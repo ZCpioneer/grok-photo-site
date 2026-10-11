@@ -222,6 +222,45 @@ def english_line(value: str, fallback: str) -> str:
     return line
 
 
+def _page_fields(photo_id: str, reading: dict, item: dict) -> dict:
+    anchors = [str(anchor)[:40] for anchor in (item.get("anchors") or reading["anchors"])][:3]
+    return {
+        "photoId": photo_id,
+        "nucleus": str(item.get("nucleus") or reading["nucleus"])[:80],
+        "anchors": anchors,
+        "discard": str(item.get("discard") or reading["discard"])[:160],
+        "copy": str(item.get("copy", "")),
+        "draw": bool(item.get("draw")),
+    }
+
+
+def normalize_story(result: dict, photos: list[dict], sentence: str) -> dict:
+    known = {photo["id"]: photo for photo in photos}
+    pages = []
+    used = set()
+    for item in result.get("pages") or []:
+        photo_id = str(item.get("photoId", ""))
+        if photo_id not in known or photo_id in used:
+            continue
+        used.add(photo_id)
+        pages.append(_page_fields(photo_id, known[photo_id]["reading"], item))
+        if len(pages) >= MAX_PAGES:
+            break
+    if not pages and photos:
+        photo = photos[0]
+        pages.append(_page_fields(photo["id"], photo["reading"], {}))
+    assign_drawing(pages)
+    cover = str(sentence).strip()[:80]
+    if pages:
+        pages[0]["copy"] = cover
+    for page in pages[1:]:
+        page["copy"] = fit_copy(page["copy"], page["nucleus"])
+    for page in pages:
+        page.pop("draw", None)
+    title = str((result or {}).get("title") or "").strip()[:24] or "一趟旅行"
+    return {"title": title, "sentence": cover, "pages": pages}
+
+
 def build_story(session: dict, answers: dict, note: str) -> dict:
     kept = []
     rejected = []
@@ -242,9 +281,10 @@ def build_story(session: dict, answers: dict, note: str) -> dict:
                 "content": (
                     "把这趟旅行排成一本纸刊的顺序。只使用给出的照片 id。"
                     f"最多 {min(MAX_PAGES, len(session['photos']))} 页，可以更少。不要按文件名排序，按回忆的先后。"
-                    "被否定的情节不要写成一页。每一页的 line 必须是一行很短的英文，像 THE BOAT STAYS."
+                    "被否定的情节不要写成一页。"
+                    "正文是两句中文，40 到 70 字。只有一页 draw 为 true，且第一页不要画。"
                     "JSON："
-                    '{"title":"中文书名","pages":[{"photoId":"","nucleus":"","anchors":["","",""],"discard":"","line":"THE BOAT STAYS."}]}'
+                    '{"title":"中文书名","pages":[{"photoId":"","copy":"","draw":false}]}'
                     f"\n已确认的一句话：{session['sentence']}"
                     f"\n用户认下的情节：{kept or '没有额外情节'}"
                     f"\n用户否定的情节：{rejected or '没有'}"
@@ -255,44 +295,7 @@ def build_story(session: dict, answers: dict, note: str) -> dict:
         ],
         2500,
     )
-    known = {photo["id"]: photo for photo in session["photos"]}
-    pages = []
-    used = set()
-    for item in result.get("pages", []):
-        photo_id = str(item.get("photoId", ""))
-        if photo_id not in known or photo_id in used:
-            continue
-        used.add(photo_id)
-        reading = known[photo_id]["reading"]
-        anchors = [str(anchor)[:40] for anchor in item.get("anchors") or reading["anchors"]][:3]
-        pages.append(
-            {
-                "photoId": photo_id,
-                "nucleus": str(item.get("nucleus") or reading["nucleus"])[:80],
-                "anchors": anchors,
-                "discard": str(item.get("discard") or reading["discard"])[:160],
-                "line": english_line(str(item.get("line", "")), "A QUIET PAGE."),
-            }
-        )
-        if len(pages) >= MAX_PAGES:
-            break
-    if not pages:
-        photo = session["photos"][0]
-        reading = photo["reading"]
-        pages.append(
-            {
-                "photoId": photo["id"],
-                "nucleus": reading["nucleus"],
-                "anchors": reading["anchors"],
-                "discard": reading["discard"],
-                "line": "A QUIET PAGE.",
-            }
-        )
-    session["story"] = {
-        "title": str(result.get("title") or "一趟旅行")[:24],
-        "sentence": str(session.get("sentence") or "")[:80],
-        "pages": pages,
-    }
+    session["story"] = normalize_story(result, session["photos"], str(session.get("sentence") or ""))
     return session["story"]
 
 

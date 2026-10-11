@@ -15,6 +15,38 @@ class FitCopyTest(unittest.TestCase):
             self.assertEqual(server.fit_copy(text, "核"), fallback)
 
 
+class NormalizeStoryTest(unittest.TestCase):
+    def test_cover_keeps_short_sentence_and_one_drawing(self):
+        photos = [
+            {"id": "a", "reading": {"nucleus": "雪", "anchors": ["山"], "discard": "塔"}},
+            {"id": "b", "reading": {"nucleus": "路", "anchors": ["雾"], "discard": ""}},
+        ]
+        raw = {
+            "title": "雪后",
+            "pages": [
+                {"photoId": "b", "copy": "路还在雾里，两边的树只剩一层浅色。我们没有再往前走，照片把这段空空地停在了这里。", "draw": False},
+                {"photoId": "a", "copy": "not chinese", "draw": True},
+                {"photoId": "missing", "copy": "路还在雾里，两边的树只剩一层浅色。我们没有再往前走，照片把这段空空地停在了这里。"},
+            ],
+        }
+        story = server.normalize_story(raw, photos, "雪停在远处，这一趟就从这里看过去。")
+        self.assertEqual(story["title"], "雪后")
+        self.assertEqual(story["pages"][0]["kind"], "cover")
+        self.assertEqual(story["pages"][0]["copy"], "雪停在远处，这一趟就从这里看过去。")
+        self.assertEqual(story["pages"][0]["photoId"], "b")
+        self.assertEqual(story["pages"][1]["kind"], "drawing")
+        self.assertEqual(story["pages"][1]["copy"], server.FALLBACK_COPY)
+        self.assertNotIn("line", story["pages"][0])
+
+    def test_empty_model_result_is_one_cover(self):
+        photos = [{"id": "a", "reading": {"nucleus": "雪", "anchors": ["山"], "discard": ""}}]
+        story = server.normalize_story({"pages": []}, photos, "")
+        self.assertEqual(len(story["pages"]), 1)
+        self.assertEqual(story["pages"][0]["kind"], "cover")
+        self.assertEqual(story["pages"][0]["photoId"], "a")
+        self.assertEqual(story["pages"][0]["copy"], "")
+
+
 class AssignDrawingTest(unittest.TestCase):
     def test_one_page_has_no_drawing(self):
         pages = [{"draw": True}]
