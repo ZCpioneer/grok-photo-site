@@ -1,3 +1,31 @@
+const SENTENCE = "雪停在远处，这一趟就从这里看过去。";
+
+export const sampleBook = {
+  id: "sample",
+  title: "试册",
+  sentence: SENTENCE,
+  created: 0,
+  sample: true,
+  pages: [
+    { url: "assets/sample/photos/terraces.jpg", kind: "cover", copy: SENTENCE },
+    {
+      url: "assets/sample/photos/fog-road.jpg",
+      kind: "photo",
+      copy: "路还在雾里，两边的树只剩一层浅色。我们没有再往前走，照片把这段空空地停在了这里。",
+    },
+    {
+      url: "assets/sample/03.png",
+      kind: "drawing",
+      copy: "盘子里只有一点点，手刚从右边离开。那一顿比这张画停得更久，味道一点都没被拍下来。",
+    },
+    {
+      url: "assets/sample/photos/alley.jpg",
+      kind: "photo",
+      copy: "这条巷子很窄，光只落在一边的墙上。我们在这儿站了一会儿，照片没能留下说话的声音。",
+    },
+  ],
+};
+
 export const FRAME = { width: 1080, height: 1440, imageHeight: 1008 };
 export const HOLD_MS = 3500;
 

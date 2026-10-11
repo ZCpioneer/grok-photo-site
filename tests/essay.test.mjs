@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { FRAME, HOLD_MS, coverSize, moveDrawing, isLegacy, essayMarkup } from "../site/essay.js";
+import { FRAME, HOLD_MS, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook } from "../site/essay.js";
 
 test("frame and hold", () => {
   assert.deepEqual(FRAME, { width: 1080, height: 1440, imageHeight: 1008 });
@@ -24,6 +24,14 @@ test("legacy markup hides the English line", () => {
   assert.equal(isLegacy({ posterId: "x", line: "THE BOAT STAYS." }), true);
   assert.match(html, /essay-legacy/);
   assert.equal(html.includes("THE BOAT STAYS."), false);
+});
+
+test("sample book is the four-page essay", () => {
+  assert.equal(sampleBook.pages.map((page) => page.kind).join(","), "cover,photo,drawing,photo");
+  assert.equal(sampleBook.sentence.length, 17);
+  assert.deepEqual(sampleBook.pages.map((page) => page.copy.length), [17, 40, 40, 40]);
+  assert.equal(sampleBook.pages[2].url, "assets/sample/03.png");
+  assert.equal(sampleBook.pages[0].url, "assets/sample/photos/terraces.jpg");
 });
 
 test("cover markup has the title and sentence, and no empty sentence", () => {

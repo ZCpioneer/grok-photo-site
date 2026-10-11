@@ -1,19 +1,7 @@
 import { choosePhotos } from "./filter.js";
 import { mountHandoff } from "./handoff.js";
 import { mountBook } from "./reader.js";
-
-const SAMPLE = {
-  id: "sample",
-  title: "试册",
-  created: 0,
-  sample: true,
-  pages: [
-    { url: "assets/sample/01.png", line: "THE VALLEY KEEPS THE SNOW." },
-    { url: "assets/sample/02.png", line: "THE BOAT STAYS." },
-    { url: "assets/sample/03.png", line: "THE PLATE IS ENOUGH." },
-    { url: "assets/sample/04.png", line: "A ROOF AND A MOUNTAIN." },
-  ],
-};
+import { sampleBook as SAMPLE } from "./essay.js";
 
 const app = document.querySelector("#app");
 const hint = document.querySelector("#hint");
