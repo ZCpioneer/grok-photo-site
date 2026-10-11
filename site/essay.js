@@ -55,6 +55,20 @@ export function isLegacy(page) {
   return page.kind == null || page.kind === "legacy";
 }
 
+export function draftMarkup(story, photosById) {
+  const pages = story.pages.map((page, index) => {
+    const photo = photosById.get(page.photoId);
+    const image = `<img class="essay-image" src="${escapeHtml(photo?.url || "")}" alt="">`;
+    const copy = String(page.copy ?? "").trim();
+    const text = copy ? `<div class="essay-copy"><p>${escapeHtml(copy)}</p></div>` : "";
+    const control = page.kind === "cover"
+      ? ""
+      : `<div class="actions"><button class="quiet" type="button" data-draw="${index}">改成画</button></div>`;
+    return `<section class="draft-page"><div class="essay-frame"><article class="essay-page">${image}${text}</article></div>${control}</section>`;
+  }).join("");
+  return `${pages}<div class="actions"><button class="primary" type="button" data-choice="draw">就按这个做</button></div>`;
+}
+
 export function readingShell() {
   return '<p class="return-link"><a href="#/">放回书架</a></p><div id="essay"></div><p class="essay-send">发出去</p><div id="handoff"></div>';
 }

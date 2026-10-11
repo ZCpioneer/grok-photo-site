@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { FRAME, HOLD_MS, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook, readingShell } from "../site/essay.js";
+import { FRAME, HOLD_MS, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook, readingShell, draftMarkup } from "../site/essay.js";
 
 test("frame and hold", () => {
   assert.deepEqual(FRAME, { width: 1080, height: 1440, imageHeight: 1008 });
@@ -34,6 +34,21 @@ test("reading shell puts the essay before the handoff", () => {
   assert.ok(essay !== -1 && send !== -1 && handoff !== -1);
   assert.ok(essay < send && send < handoff);
   assert.equal(html.includes("翻册"), false);
+});
+
+test("draft shows the photo and a drawing control", () => {
+  const html = draftMarkup({
+    title: "雪后",
+    sentence: "雪停在远处，这一趟就从这里看过去。",
+    pages: [
+      { photoId: "a", kind: "cover", copy: "雪停在远处，这一趟就从这里看过去。" },
+      { photoId: "b", kind: "drawing", copy: "路还在雾里，两边的树只剩一层浅色。我们没有再往前走，照片把这段空空地停在了这里。" },
+    ],
+  }, new Map([["a", { url: "a.jpg" }], ["b", { url: "b.jpg" }]]));
+  assert.match(html, /就按这个做/);
+  assert.match(html, /data-draw="1"/);
+  assert.equal(html.includes("data-draw=\"0\""), false);
+  assert.equal(html.includes("THE "), false);
 });
 
 test("sample book is the four-page essay", () => {

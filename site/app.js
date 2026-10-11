@@ -1,6 +1,6 @@
 import { choosePhotos } from "./filter.js";
 import { mountHandoff } from "./handoff.js";
-import { essayMarkup, readingShell, sampleBook as SAMPLE } from "./essay.js";
+import { draftMarkup, essayMarkup, readingShell, sampleBook as SAMPLE } from "./essay.js";
 
 const app = document.querySelector("#app");
 const hint = document.querySelector("#hint");
@@ -443,7 +443,15 @@ async function confirmSentence(token, session, draft, chosen) {
     const note = app.querySelector("#note").value.trim();
     try {
       const story = await post("/api/story", { session, answers, note });
-      if (alive(token)) await confirmStory(token, session, story, () => confirmSentence(token, session, draft, chosen));
+      if (alive(token)) {
+        await confirmStory(
+          token,
+          session,
+          story,
+          () => confirmSentence(token, session, draft, chosen),
+          chosen,
+        );
+      }
     } catch (reason) {
       if (!alive(token)) return;
       const error = app.querySelector("#make-error");
@@ -454,27 +462,66 @@ async function confirmSentence(token, session, draft, chosen) {
   });
 }
 
-async function confirmStory(token, session, story, back) {
+async function confirmStory(token, session, story, back, chosen) {
   if (!alive(token)) return;
-  const items = story.pages.map((page) => `<li>${escape(page.nucleus)}<small>${escape(page.line)}</small></li>`).join("");
-  render(`
-    <div class="card">
-      <p class="kicker">${escape(story.title)}</p>
-      <p class="lead">相册会按这个顺序走。到这里还没有画册。点头之后才一页页画，一册最多六页。</p>
-      <ol class="story">${items}</ol>
-      <p class="error" id="make-error" hidden></p>
-      <div class="actions">
-        <button class="primary" type="button" data-choice="draw">就按这个画</button>
-        <button class="quiet" type="button" data-choice="back">回到勾选</button>
-      </div>
-    </div>`);
+  const urls = [];
+  const photosById = new Map();
+  for (const photo of chosen?.kept || []) {
+    const url = URL.createObjectURL(photo.blob);
+    urls.push(url);
+    photosById.set(photo.id, { url });
+  }
+  let current = story;
+  let released = false;
+  const release = () => {
+    if (released) return;
+    released = true;
+    urls.forEach((url) => URL.revokeObjectURL(url));
+  };
+  const paint = () => {
+    app.innerHTML = `
+      <div class="card">
+        <p class="kicker">${escape(current.title)}</p>
+        <p class="lead">照片还是照片。要换的那一页，点「改成画」。认了才开始做。</p>
+        ${draftMarkup(current, photosById)}
+        <p class="error" id="make-error" hidden></p>
+        <div class="actions">
+          <button class="quiet" type="button" data-choice="back">回到勾选</button>
+        </div>
+      </div>`;
+  };
+  const onDraw = async (event) => {
+    const button = event.target.closest("[data-draw]");
+    if (!button || button.disabled) return;
+    button.disabled = true;
+    try {
+      current = await post("/api/drawing", { session, index: Number(button.dataset.draw) });
+      if (!alive(token)) return;
+      paint();
+    } catch (reason) {
+      if (!alive(token)) return;
+      const error = app.querySelector("#make-error");
+      if (!error) return;
+      error.hidden = false;
+      error.textContent = reason.message;
+      button.disabled = false;
+    }
+  };
+  paint();
+  app.addEventListener("click", onDraw);
+  const prior = cleanup;
+  cleanup = () => {
+    app.removeEventListener("click", onDraw);
+    release();
+    prior();
+  };
   const choice = await waitForChoice(app);
   if (!alive(token) || !choice) return;
   if (choice === "back") {
     await back();
     return;
   }
-  await drawBook(token, session, story);
+  await drawBook(token, session, current);
 }
 
 async function drawOne(session, index) {
