@@ -1,7 +1,6 @@
 import { choosePhotos } from "./filter.js";
 import { mountHandoff } from "./handoff.js";
-import { mountBook } from "./reader.js";
-import { sampleBook as SAMPLE } from "./essay.js";
+import { essayMarkup, readingShell, sampleBook as SAMPLE } from "./essay.js";
 
 const app = document.querySelector("#app");
 const hint = document.querySelector("#hint");
@@ -225,42 +224,54 @@ function showMissing() {
 }
 
 function showReading(pages, meta) {
-  render(`<p class="return-link"><a href="#/">放回书架</a><button class="linkish" type="button" id="to-book" aria-pressed="false">翻册</button></p><div id="handoff"></div><div id="reader" hidden></div>`);
+  setHint("先读这篇");
+  render(readingShell());
   const viewPages = pages.map((page) => {
-    if (!page.blob) return page;
+    const view = {
+      ...page,
+      title: page.title || meta.title || "",
+      sentence: page.sentence ?? meta.sentence ?? "",
+    };
+    if (!page.blob) return view;
     const url = URL.createObjectURL(page.blob);
     objectUrls.push(url);
-    return { url, line: page.line };
+    return { ...view, url };
   });
-  const reader = app.querySelector("#reader");
-  const bookButton = app.querySelector("#to-book");
-  let stopBook = () => {};
-  let opened = false;
-  const handoff = mountHandoff(app.querySelector("#handoff"), { ...meta, pages: viewPages }, {
-    openBook() {
-      reader.hidden = false;
-      if (!opened) {
-        stopBook = mountBook(reader, viewPages);
-        opened = true;
-      }
-      bookButton.setAttribute("aria-pressed", "true");
-    },
-    closeBook() {
-      reader.hidden = true;
-      bookButton.setAttribute("aria-pressed", "false");
-    },
-  });
-  bookButton.addEventListener("click", () => handoff.readBook());
-  cleanup = () => {
-    stopBook();
-    handoff.stop();
+  const essay = app.querySelector("#essay");
+  let index = 0;
+  const paint = () => {
+    const last = viewPages.length - 1;
+    essay.innerHTML = `
+      <button class="essay-nav prev" type="button" data-step="-1" ${index === 0 ? "disabled" : ""}>上一页</button>
+      <div class="essay-frame">${viewPages.length ? essayMarkup(viewPages[index]) : ""}</div>
+      <button class="essay-nav next" type="button" data-step="1" ${index >= last ? "disabled" : ""}>下一页</button>`;
   };
+  const go = (step) => {
+    const next = index + step;
+    if (next < 0 || next >= viewPages.length) return;
+    index = next;
+    paint();
+  };
+  essay.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-step]");
+    if (button) {
+      if (!button.disabled) go(Number(button.dataset.step));
+      return;
+    }
+    const frame = essay.querySelector(".essay-frame");
+    if (!frame) return;
+    const bounds = frame.getBoundingClientRect();
+    go(event.clientX < bounds.left + bounds.width / 2 ? -1 : 1);
+  });
+  paint();
+  const handoff = mountHandoff(app.querySelector("#handoff"), { ...meta, pages: viewPages });
+  cleanup = () => handoff.stop();
 }
 
 async function showBook(token, id) {
   setHint("点一个名字，看发出去的样子");
   if (id === SAMPLE.id) {
-    showReading(SAMPLE.pages, { title: SAMPLE.title, sentence: "", pages: SAMPLE.pages });
+    showReading(SAMPLE.pages, { title: SAMPLE.title, sentence: SAMPLE.sentence, pages: SAMPLE.pages });
     return;
   }
   let album;

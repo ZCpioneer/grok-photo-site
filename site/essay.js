@@ -55,6 +55,10 @@ export function isLegacy(page) {
   return page.kind == null || page.kind === "legacy";
 }
 
+export function readingShell() {
+  return '<p class="return-link"><a href="#/">放回书架</a></p><div id="essay"></div><p class="essay-send">发出去</p><div id="handoff"></div>';
+}
+
 export function essayMarkup(page) {
   const image = `<img class="essay-image" src="${escapeHtml(page.url)}" alt="">`;
   if (isLegacy(page)) return `<figure class="essay-legacy">${image}</figure>`;

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { FRAME, HOLD_MS, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook } from "../site/essay.js";
+import { FRAME, HOLD_MS, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook, readingShell } from "../site/essay.js";
 
 test("frame and hold", () => {
   assert.deepEqual(FRAME, { width: 1080, height: 1440, imageHeight: 1008 });
@@ -24,6 +24,16 @@ test("legacy markup hides the English line", () => {
   assert.equal(isLegacy({ posterId: "x", line: "THE BOAT STAYS." }), true);
   assert.match(html, /essay-legacy/);
   assert.equal(html.includes("THE BOAT STAYS."), false);
+});
+
+test("reading shell puts the essay before the handoff", () => {
+  const html = readingShell();
+  const essay = html.indexOf('id="essay"');
+  const send = html.indexOf("发出去");
+  const handoff = html.indexOf('id="handoff"');
+  assert.ok(essay !== -1 && send !== -1 && handoff !== -1);
+  assert.ok(essay < send && send < handoff);
+  assert.equal(html.includes("翻册"), false);
 });
 
 test("sample book is the four-page essay", () => {

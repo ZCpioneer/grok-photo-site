@@ -455,7 +455,7 @@ export function mountHandoff(host, book, hooks = {}) {
           <button type="button" role="tab" data-format="xhs" aria-selected="false">小红书</button>
           <button type="button" role="tab" data-format="video" aria-selected="false">视频</button>
         </div>
-        <button class="linkish" type="button" data-set="masters">保存原图</button>
+        <button class="linkish" type="button" data-set="masters">保存画面</button>
       </div>
       <div class="stage"></div>
     </section>`;
@@ -493,7 +493,7 @@ export function mountHandoff(host, book, hooks = {}) {
     stage.hidden = false;
     if (format === "video") {
       stage.innerHTML = videoMarkup(book);
-      startReel();
+      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) startReel();
       return;
     }
     stopReel();
