@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { FRAME, HOLD_MS, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook, readingShell, draftMarkup, pagesToStore, skipDrawing, exportSize, pageTurn, layoutCopy } from "../site/essay.js";
+import { FRAME, HOLD_MS, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook, readingShell, draftMarkup, pagesToStore, skipDrawing, exportSize, pageTurn, layoutCopy, holdMs, reelCues, reelDurationLabel, imageFit, placeImage, wrapLines } from "../site/essay.js";
 
 test("frame and hold", () => {
   assert.deepEqual(FRAME, { width: 1080, height: 1440, imageHeight: 1008 });
@@ -112,9 +112,49 @@ test("exports keep the whole 3:4 page", () => {
 test("sample book is the four-page essay", () => {
   assert.equal(sampleBook.pages.map((page) => page.kind).join(","), "cover,photo,drawing,photo");
   assert.equal(sampleBook.sentence.length, 17);
-  assert.deepEqual(sampleBook.pages.map((page) => page.copy.length), [17, 40, 40, 40]);
+  assert.deepEqual(sampleBook.pages.map((page) => page.copy.length), [17, 44, 40, 40]);
   assert.equal(sampleBook.pages[2].url, "assets/sample/03.png");
   assert.equal(sampleBook.pages[0].url, "assets/sample/photos/terraces.jpg");
+});
+
+test("sample body pages say what the photo leaves out", () => {
+  assert.equal(sampleBook.pages[1].copy, "路还在雾里，两边的树只剩一层浅色。雾把脚步声吃掉了，湿气停在镜头外面，照片里没有这层冷。");
+  assert.equal(sampleBook.pages[3].copy, "这条巷子很窄，光只落在一边的墙上。说话的声音停在墙外面，照片里只剩下这一边的光。");
+  assert.equal(sampleBook.pages[1].copy.length, 44);
+  assert.equal(sampleBook.pages[3].copy.length, 40);
+});
+
+test("holds follow the page and cap at twelve seconds", () => {
+  assert.equal(holdMs({ kind: "cover", title: "题".repeat(24), sentence: "句".repeat(80) }), 3000);
+  assert.equal(holdMs({ kind: "photo", copy: "测".repeat(77) + "。完。" }), 12000);
+  assert.equal(holdMs({ kind: "photo", copy: sampleBook.pages[1].copy }), 8280);
+  const reel = reelCues(sampleBook.pages);
+  assert.equal(reel.fade, 0.45);
+  assert.equal(reel.cues[0].start, 0);
+  assert.equal(reel.cues[0].hold, 3);
+  assert.equal(reel.cues[1].start, 3.45);
+  assert.equal(reel.total, 28.23);
+  assert.equal(reelDurationLabel(sampleBook.pages), "约 28 秒");
+});
+
+test("a portrait sits inside the band and a landscape fills it", () => {
+  assert.equal(imageFit(3, 4), "contain");
+  assert.equal(imageFit(4, 3), "cover");
+  assert.equal(imageFit(1, 1), "cover");
+  assert.equal(imageFit(0, 0), "contain");
+  assert.deepEqual(placeImage(3, 4, 1080, 1008), {
+    sx: 0, sy: 0, sw: 3, sh: 4, dx: 162, dy: 0, dw: 756, dh: 1008,
+  });
+  const wide = placeImage(4, 3, 1080, 1008);
+  assert.equal(wide.dx, 0);
+  assert.equal(wide.dy, 0);
+  assert.equal(wide.dw, 1080);
+  assert.equal(wide.dh, 1008);
+  assert.ok(wide.sw < 4);
+});
+
+test("punctuation does not open a line", () => {
+  assert.deepEqual(wrapLines("雾气很冷。树", 4, (text) => text.length), ["雾气很冷。", "树"]);
 });
 
 test("cover markup has the title and sentence, and no empty sentence", () => {

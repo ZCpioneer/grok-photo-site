@@ -11,7 +11,7 @@ export const sampleBook = {
     {
       url: "assets/sample/photos/fog-road.jpg",
       kind: "photo",
-      copy: "路还在雾里，两边的树只剩一层浅色。我们没有再往前走，照片把这段空空地停在了这里。",
+      copy: "路还在雾里，两边的树只剩一层浅色。雾把脚步声吃掉了，湿气停在镜头外面，照片里没有这层冷。",
     },
     {
       url: "assets/sample/03.png",
@@ -21,13 +21,59 @@ export const sampleBook = {
     {
       url: "assets/sample/photos/alley.jpg",
       kind: "photo",
-      copy: "这条巷子很窄，光只落在一边的墙上。我们在这儿站了一会儿，照片没能留下说话的声音。",
+      copy: "这条巷子很窄，光只落在一边的墙上。说话的声音停在墙外面，照片里只剩下这一边的光。",
     },
   ],
 };
 
 export const FRAME = { width: 1080, height: 1440, imageHeight: 1008 };
 export const HOLD_MS = 3500;
+export const FADE_MS = 450;
+
+export function holdMs(page) {
+  if (page?.kind === "cover") return 3000;
+  const count = String(page?.copy ?? "").trim().length;
+  return Math.min(12000, 3000 + 120 * count);
+}
+
+export function reelCues(pages) {
+  const fade = FADE_MS / 1000;
+  let start = 0;
+  const cues = (pages || []).map((page) => {
+    const hold = holdMs(page) / 1000;
+    const cue = { start, hold };
+    start += hold + fade;
+    return cue;
+  });
+  const total = cues.length ? start - fade : 0;
+  return { fade, cues, total };
+}
+
+export function reelDurationLabel(pages) {
+  return `约 ${Math.round(reelCues(pages).total)} 秒`;
+}
+
+export function imageFit(srcW, srcH) {
+  if (!srcW || !srcH || srcH > srcW) return "contain";
+  return "cover";
+}
+
+export function placeImage(srcW, srcH, destW, destH) {
+  if (imageFit(srcW, srcH) === "contain") {
+    const scale = Math.min(destW / srcW, destH / srcH);
+    const dw = srcW * scale;
+    const dh = srcH * scale;
+    return { sx: 0, sy: 0, sw: srcW, sh: srcH, dx: (destW - dw) / 2, dy: (destH - dh) / 2, dw, dh };
+  }
+  const destRatio = destW / destH;
+  const srcRatio = srcW / srcH;
+  if (srcRatio > destRatio) {
+    const sw = srcH * destRatio;
+    return { sx: (srcW - sw) / 2, sy: 0, sw, sh: srcH, dx: 0, dy: 0, dw: destW, dh: destH };
+  }
+  const sh = srcW / destRatio;
+  return { sx: 0, sy: (srcH - sh) / 2, sw: srcW, sh, dx: 0, dy: 0, dw: destW, dh: destH };
+}
 
 const ESCAPE = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 
@@ -52,7 +98,9 @@ export function pageTurn(clientX, bounds, inText) {
   return clientX < bounds.left + bounds.width / 2 ? -1 : 1;
 }
 
-function wrapToWidth(text, maxWidth, measure) {
+const HANG = "。，！？、";
+
+export function wrapLines(text, maxWidth, measure) {
   const lines = [];
   let line = "";
   for (const char of String(text)) {
@@ -65,13 +113,19 @@ function wrapToWidth(text, maxWidth, measure) {
     }
   }
   if (line) lines.push(line);
-  return lines;
+  for (let index = 1; index < lines.length; index += 1) {
+    while (lines[index] && HANG.includes(lines[index][0])) {
+      lines[index - 1] += lines[index][0];
+      lines[index] = lines[index].slice(1);
+    }
+  }
+  return lines.filter((item) => item);
 }
 
 export function layoutCopy(blocks, { width, top, bottom, measure, scale = width / 420 }) {
   const maxWidth = width - 22 * scale * 2;
   const build = (fontSize) => blocks.flatMap((block, index) => {
-    const lines = wrapToWidth(String(block).trim(), maxWidth, (text) => measure(text, fontSize));
+    const lines = wrapLines(String(block).trim(), maxWidth, (text) => measure(text, fontSize));
     return index ? ["", ...lines] : lines;
   });
   const used = (fontSize, lines) => {
