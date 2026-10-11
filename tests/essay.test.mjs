@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { FRAME, HOLD_MS, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook, readingShell, draftMarkup } from "../site/essay.js";
+import { FRAME, HOLD_MS, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook, readingShell, draftMarkup, pagesToStore, skipDrawing } from "../site/essay.js";
 
 test("frame and hold", () => {
   assert.deepEqual(FRAME, { width: 1080, height: 1440, imageHeight: 1008 });
@@ -49,6 +49,23 @@ test("draft shows the photo and a drawing control", () => {
   assert.match(html, /data-draw="1"/);
   assert.equal(html.includes("data-draw=\"0\""), false);
   assert.equal(html.includes("THE "), false);
+});
+
+test("stored pages keep kind and copy without the English line", () => {
+  const stored = pagesToStore([
+    { kind: "cover", copy: "一句。" },
+    { kind: "drawing", copy: "两句。停在这里。" },
+  ], ["id-1", "id-2"]);
+  assert.deepEqual(stored, [
+    { posterId: "id-1", kind: "cover", copy: "一句。" },
+    { posterId: "id-2", kind: "drawing", copy: "两句。停在这里。" },
+  ]);
+});
+
+test("skipping the drawing keeps that page as a photo", () => {
+  const pages = [{ kind: "cover" }, { kind: "drawing" }, { kind: "photo" }];
+  assert.deepEqual(skipDrawing(pages, 1).map((page) => page.kind), ["cover", "photo", "photo"]);
+  assert.deepEqual(skipDrawing(pages, 0).map((page) => page.kind), ["cover", "drawing", "photo"]);
 });
 
 test("sample book is the four-page essay", () => {

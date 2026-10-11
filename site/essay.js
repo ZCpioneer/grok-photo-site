@@ -55,6 +55,21 @@ export function isLegacy(page) {
   return page.kind == null || page.kind === "legacy";
 }
 
+export function pagesToStore(storyPages, ids) {
+  if (ids.length !== storyPages.length) throw new Error("页数和编号对不上");
+  return storyPages.map((page, index) => ({
+    posterId: ids[index],
+    kind: page.kind,
+    copy: page.copy ?? "",
+  }));
+}
+
+export function skipDrawing(pages, index) {
+  return pages.map((page, position) => (
+    position === index && page.kind === "drawing" ? { ...page, kind: "photo" } : { ...page }
+  ));
+}
+
 export function draftMarkup(story, photosById) {
   const pages = story.pages.map((page, index) => {
     const photo = photosById.get(page.photoId);

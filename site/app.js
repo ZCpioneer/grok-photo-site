@@ -1,6 +1,6 @@
 import { choosePhotos } from "./filter.js";
 import { mountHandoff } from "./handoff.js";
-import { draftMarkup, essayMarkup, readingShell, sampleBook as SAMPLE } from "./essay.js";
+import { draftMarkup, essayMarkup, pagesToStore, readingShell, sampleBook as SAMPLE, skipDrawing } from "./essay.js";
 
 const app = document.querySelector("#app");
 const hint = document.querySelector("#hint");
@@ -90,7 +90,12 @@ async function readAlbum(id) {
         const posterRequest = posters.get(page.posterId);
         posterRequest.onerror = () => reject(posterRequest.error);
         posterRequest.onsuccess = () => {
-          pages[index] = { line: page.line, blob: posterRequest.result };
+          pages[index] = {
+            ...page,
+            kind: page.kind || "legacy",
+            copy: page.kind ? (page.copy || "") : "",
+            blob: posterRequest.result,
+          };
           pending -= 1;
           if (pending === 0) resolve({ ...stored, pages });
         };
@@ -521,39 +526,41 @@ async function confirmStory(token, session, story, back, chosen) {
     await back();
     return;
   }
-  await drawBook(token, session, current);
+  await drawBook(token, session, current, chosen);
 }
 
-async function drawOne(session, index) {
-  const result = await post("/api/poster", { session, index });
-  const response = await fetch(result.url);
-  if (!response.ok) throw new Error("这一页画完了，但没有存下来");
-  const blob = await response.blob();
-  return { line: result.line, title: result.title, blob };
-}
-
-async function drawBook(token, session, story) {
-  const drawn = [];
-  for (let index = 0; index < story.pages.length; index += 1) {
-    let page = null;
-    while (!page && alive(token)) {
+async function drawBook(token, session, story, chosen) {
+  const kept = new Map((chosen?.kept || []).map((photo) => [photo.id, photo.blob]));
+  let pages = story.pages.map((page) => ({ ...page }));
+  const made = [];
+  for (let index = 0; index < pages.length; index += 1) {
+    if (pages[index].kind !== "drawing") {
+      const blob = kept.get(pages[index].photoId);
+      if (blob) made.push({ page: pages[index], blob });
+      continue;
+    }
+    let blob = null;
+    let skipped = false;
+    while (!blob && !skipped && alive(token)) {
       render(`
         <div class="card">
           <p class="kicker">${escape(story.title)}</p>
-          <p class="sentence">正在画第 ${index + 1} 页</p>
-          <p class="lead">共 ${story.pages.length} 页。画的时候先留在这一页。一页要一会儿。</p>
-          <p class="lead">已完成 ${drawn.length} 页。</p>
+          <p class="sentence">正在画这一页</p>
+          <p class="lead">只有这一页要画。其余的页用原来的照片。</p>
         </div>`);
       try {
-        page = await drawOne(session, index);
+        const result = await post("/api/poster", { session, index });
+        const response = await fetch(result.url);
+        if (!response.ok) throw new Error("这一页画完了，但没有存下来");
+        blob = await response.blob();
       } catch (reason) {
         if (!alive(token)) return;
         render(`
           <div class="card">
             <p class="kicker">${escape(story.title)}</p>
-            <p class="sentence">第 ${index + 1} 页没有画成</p>
+            <p class="sentence">这一页没有画成</p>
             <p class="error">${escape(reason.message)}</p>
-            <p class="lead">这一页可以再试。跳过的话，册子用已经画成的页。</p>
+            <p class="lead">这一页可以再试。跳过的话，用原来的照片，后面的页继续。</p>
             <div class="actions">
               <button class="primary" type="button" data-choice="retry">再画这一页</button>
               <button class="quiet" type="button" data-choice="skip">跳过这一页</button>
@@ -561,17 +568,21 @@ async function drawBook(token, session, story) {
           </div>`);
         const choice = await waitForChoice(app);
         if (!alive(token) || !choice) return;
-        if (choice === "skip") break;
+        if (choice === "skip") {
+          pages = skipDrawing(pages, index);
+          blob = kept.get(pages[index].photoId) || null;
+          skipped = true;
+        }
       }
     }
-    if (page) drawn.push(page);
+    if (blob) made.push({ page: pages[index], blob });
   }
   if (!alive(token)) return;
-  if (!drawn.length) {
+  if (!made.length) {
     render(`
       <div class="card">
         <h1>这本还没有页</h1>
-        <p class="lead">一页都没有留下来，所以没有放上书架。</p>
+        <p class="lead">一页原片都没有留下来，所以没有放上书架。</p>
         <div class="actions"><a class="primary" href="#/make">重新丢照片</a></div>
       </div>`);
     return;
@@ -581,10 +592,10 @@ async function drawBook(token, session, story) {
     title: story.title || "一趟旅行",
     created: Date.now(),
     sentence: story.sentence || "",
-    pages: drawn.map((page) => ({ line: page.line, posterId: crypto.randomUUID() })),
+    pages: pagesToStore(made.map((item) => item.page), made.map(() => crypto.randomUUID())),
   };
   try {
-    await saveAlbum(album, drawn.map((page) => page.blob));
+    await saveAlbum(album, made.map((item) => item.blob));
   } catch {
     if (!alive(token)) return;
     render(`
