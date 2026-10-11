@@ -1,4 +1,4 @@
-import { FRAME, HOLD_MS, coverSize, exportSize, isLegacy, layoutCopy } from "./essay.js";
+import { FADE_MS, FRAME, coverSize, exportSize, isLegacy, layoutCopy, placeImage, reelCues, trackedWidth, videoLead } from "./essay.js";
 
 const CRC_TABLE = new Uint32Array(256);
 for (let n = 0; n < 256; n += 1) {
@@ -107,17 +107,6 @@ function jpeg(canvas) {
   });
 }
 
-function coverCrop(srcW, srcH, destW, destH) {
-  const destRatio = destW / destH;
-  const srcRatio = srcW / srcH;
-  if (srcRatio > destRatio) {
-    const sw = srcH * destRatio;
-    return { sx: (srcW - sw) / 2, sy: 0, sw, sh: srcH };
-  }
-  const sh = srcW / destRatio;
-  return { sx: 0, sy: (srcH - sh) / 2, sw: srcW, sh };
-}
-
 function paintEssay(ctx, image, page, size) {
   const { width, height } = size;
   ctx.fillStyle = "#f3eedf";
@@ -132,8 +121,8 @@ function paintEssay(ctx, image, page, size) {
     return;
   }
   const band = Math.round(FRAME.imageHeight * height / FRAME.height);
-  const crop = coverCrop(image.width, image.height, width, band);
-  ctx.drawImage(image, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, width, band);
+  const placed = placeImage(image.width, image.height, width, band);
+  ctx.drawImage(image, placed.sx, placed.sy, placed.sw, placed.sh, placed.dx, placed.dy, placed.dw, placed.dh);
   const blocks = page.kind === "cover"
     ? [page.title, page.sentence].filter((item) => String(item || "").trim())
     : [page.copy].filter((item) => String(item || "").trim());
@@ -141,25 +130,43 @@ function paintEssay(ctx, image, page, size) {
   const scale = width / 420;
   const top = band + 16 * scale;
   const bottom = height - 12 * scale;
+  const typeface = `"Songti SC", "Iowan Old Style", Palatino, serif`;
   const laid = layoutCopy(blocks, {
     width,
     top,
     bottom,
     scale,
-    measure: (text, fontSize) => {
-      ctx.font = `${fontSize}px "Songti SC", "Iowan Old Style", Palatino, serif`;
+    ranks: page.kind === "cover" ? [28, 22] : undefined,
+    measure: (text, fontSize, blockIndex) => {
+      ctx.font = `${fontSize}px ${typeface}`;
+      if (page.kind === "cover" && blockIndex === 0) {
+        return trackedWidth(text, fontSize, (char) => ctx.measureText(char).width, 0.12);
+      }
       return ctx.measureText(text).width;
     },
   });
-  const lineHeight = laid.fontSize * 1.55;
-  ctx.fillStyle = "#282923";
   ctx.textBaseline = "top";
-  ctx.font = `${laid.fontSize}px "Songti SC", "Iowan Old Style", Palatino, serif`;
   let y = top;
-  for (const line of laid.lines) {
-    if (line) ctx.fillText(line, 22 * scale, y);
+  laid.lines.forEach((line, index) => {
+    const fontSize = laid.lineSizes[index];
+    const lineHeight = fontSize * 1.55;
+    if (line) {
+      const title = page.kind === "cover" && laid.lineBlocks[index] === 0;
+      ctx.fillStyle = page.kind === "cover" && laid.lineBlocks[index] > 0 ? "#6f6e64" : "#282923";
+      ctx.font = `${fontSize}px ${typeface}`;
+      if (title) {
+        let x = 22 * scale;
+        [...line].forEach((char, glyph) => {
+          ctx.fillText(char, x, y);
+          x += ctx.measureText(char).width;
+          if (glyph < [...line].length - 1) x += 0.12 * fontSize;
+        });
+      } else {
+        ctx.fillText(line, 22 * scale, y);
+      }
+    }
     y += line ? lineHeight : lineHeight * 0.4;
-  }
+  });
 }
 
 function compose(image, page, size) {
@@ -172,7 +179,6 @@ function compose(image, page, size) {
 
 async function prepare(book, urls, cancelled) {
   const stem = fileStem(book.title);
-  const masters = [];
   const squares = [];
   const xhs = [];
   let cover = null;
@@ -186,7 +192,6 @@ async function prepare(book, urls, cancelled) {
     const n = String(index + 1).padStart(2, "0");
     const framed = await jpeg(compose(image, page, PAGE_BOX));
     const preview = track(urls, framed);
-    masters.push({ blob: framed, name: `${stem}-画面-${n}.jpg`, preview });
     xhs.push({ blob: framed, name: `${stem}-小红书-${n}.jpg`, preview });
     if (index === 0) {
       const coverBlob = await jpeg(compose(image, page, COVER_BOX));
@@ -200,28 +205,32 @@ async function prepare(book, urls, cancelled) {
     }
     image.close?.();
   }
-  return { masters, squares, xhs, cover, caption: captionOf(book) };
+  return { squares, xhs, cover, caption: captionOf(book) };
 }
 
-function shot(file, group, index) {
-  return `<button class="shot" type="button" data-one="${group}:${index}" aria-label="保存${escape(file.name)}"><img src="${file.preview}" alt=""></button>`;
-}
-
-function momentsMarkup(pack) {
-  const rest = pack.squares.map((file, index) => shot(file, "squares", index)).join("");
-  const restPiece = pack.squares.length ? `
-      <div class="piece grid-piece">
-        <div class="grid-preview" data-count="${pack.squares.length}">${rest}</div>
-        <div class="actions"><button class="primary" type="button" data-set="squares">保存后面几页</button></div>
-      </div>` : "";
+export function handoffShell() {
   return `
-    <p class="lead">封面单独发。后面几页是这本的其余页。</p>
-    <div class="moments-stage">
-      <div class="piece">
-        <button class="shot cover-shot" type="button" data-one="cover:0" aria-label="保存${escape(pack.cover.name)}"><img src="${pack.cover.preview}" alt=""></button>
-        <div class="actions"><button class="primary" type="button" data-set="cover">保存封面</button></div>
+    <section class="handoff">
+      <div class="format-row">
+        <div class="formats" role="tablist" aria-label="发出去的形式">
+          <button type="button" role="tab" data-format="moments" aria-selected="false">朋友圈</button>
+          <button type="button" role="tab" data-format="xhs" aria-selected="false">小红书</button>
+          <button type="button" role="tab" data-format="video" aria-selected="false">视频</button>
+        </div>
       </div>
-      ${restPiece}
+      <div class="stage" hidden></div>
+    </section>`;
+}
+
+export function momentsMarkup(pack) {
+  const files = [pack.cover, ...(pack.squares || [])].filter(Boolean);
+  const shots = files.map((file, index) => `
+    <button class="shot" type="button" data-look="${index}" aria-label="${escape(file.name)}"><img src="${escape(file.preview)}" alt=""></button>`).join("");
+  return `
+    <div class="moments-stage">
+      <img class="moments-hero" data-hero src="${escape(files[0]?.preview || "")}" alt="">
+      <div class="grid-preview" data-count="${files.length}">${shots}</div>
+      <div class="actions"><button class="primary" type="button" data-set="moments">保存这一套</button></div>
     </div>`;
 }
 
@@ -256,22 +265,22 @@ function videoMarkup(book, frames) {
   const reel = items.map((page, index) => `<img src="${page.preview || page.url}" alt="" class="${index === 0 ? "on" : ""}">`).join("");
   return `
     <div class="reel" data-reel>${reel}</div>
-    <p class="lead">竖屏，一页一页翻。</p>
-    <div class="actions"><button class="primary" type="button" data-video="1">保存视频</button></div>
+    <div class="actions">
+      <button class="primary" type="button" data-video="1">保存视频</button>
+      <p class="lead">${escape(videoLead(book.pages))}</p>
+    </div>
     <p class="error" data-video-error hidden>这台浏览器做不成视频。画面可以在这里看。</p>`;
 }
 
 function filesFor(pack, key) {
-  if (key === "cover") return [pack.cover];
-  if (key === "masters") return pack.masters;
+  if (key === "moments") return [pack.cover, ...(pack.squares || [])].filter(Boolean);
   if (key === "squares") return pack.squares;
   return pack.xhs;
 }
 
 function zipName(key, title) {
   const stem = fileStem(title);
-  if (key === "masters") return `${stem}-画面.zip`;
-  if (key === "squares") return `${stem}-朋友圈.zip`;
+  if (key === "moments") return `${stem}-朋友圈.zip`;
   return `${stem}-小红书.zip`;
 }
 
@@ -382,10 +391,7 @@ async function recordReel(pages, title) {
     }
   });
   if (!mime || typeof canvas.captureStream !== "function") throw new Error("unsupported");
-  const fade = 0.45;
-  const hold = HOLD_MS / 1000;
-  const span = hold + fade;
-  const total = pages.length * span - fade;
+  const { fade, cues, total } = reelCues(pages);
   const stream = canvas.captureStream(30);
   const recorder = new MediaRecorder(stream, { mimeType: mime, videoBitsPerSecond: 4_000_000 });
   const chunks = [];
@@ -396,13 +402,18 @@ async function recordReel(pages, title) {
     recorder.onstop = resolve;
   });
   const paint = (time) => {
-    const pos = Math.min(pages.length - 1, time / span);
-    const index = Math.min(pages.length - 1, Math.floor(pos));
-    const local = pos - index;
+    let index = cues.length - 1;
+    for (let i = 0; i < cues.length - 1; i += 1) {
+      if (time < cues[i + 1].start) {
+        index = i;
+        break;
+      }
+    }
+    const local = time - cues[index].start;
     ctx.globalAlpha = 1;
     ctx.drawImage(frames[index], 0, 0);
-    if (index < pages.length - 1 && local > hold) {
-      ctx.globalAlpha = Math.min(1, (local - hold) / fade);
+    if (index < pages.length - 1 && local > cues[index].hold) {
+      ctx.globalAlpha = Math.min(1, (local - cues[index].hold) / fade);
       ctx.drawImage(frames[index + 1], 0, 0);
       ctx.globalAlpha = 1;
     }
@@ -433,28 +444,15 @@ async function recordReel(pages, title) {
 export function mountHandoff(host, book, hooks = {}) {
   let cancelled = false;
   let pack = null;
-  let format = "moments";
+  let format = "";
   let xhsIndex = 0;
   let reelTimer = 0;
   const urls = [];
-  host.innerHTML = `
-    <section class="handoff">
-      <div class="format-row">
-        <div class="formats" role="tablist" aria-label="发出去的形式">
-          <button type="button" role="tab" data-format="moments" aria-selected="true">朋友圈</button>
-          <button type="button" role="tab" data-format="xhs" aria-selected="false">小红书</button>
-          <button type="button" role="tab" data-format="video" aria-selected="false">视频</button>
-        </div>
-        <button class="linkish" type="button" data-set="masters">保存画面</button>
-      </div>
-      <div class="stage"></div>
-    </section>`;
+  host.innerHTML = handoffShell();
   const stage = host.querySelector(".stage");
-  const mastersButton = host.querySelector("[data-set='masters']");
-  mastersButton.disabled = true;
 
   function stopReel() {
-    window.clearInterval(reelTimer);
+    window.clearTimeout(reelTimer);
     reelTimer = 0;
   }
 
@@ -465,12 +463,19 @@ export function mountHandoff(host, book, hooks = {}) {
     if (!frame) return;
     const images = [...frame.querySelectorAll("img")];
     if (images.length < 2) return;
+    const { cues } = reelCues(book.pages);
     let index = 0;
-    reelTimer = window.setInterval(() => {
-      images[index].classList.remove("on");
-      index = (index + 1) % images.length;
-      images[index].classList.add("on");
-    }, HOLD_MS);
+    const arm = () => {
+      const hold = (cues[index]?.hold ?? 3) * 1000;
+      reelTimer = window.setTimeout(() => {
+        const next = (index + 1) % images.length;
+        images[index].classList.remove("on");
+        images[next].classList.add("on");
+        index = next;
+        reelTimer = window.setTimeout(arm, FADE_MS);
+      }, hold);
+    };
+    arm();
   }
 
   function markTabs() {
@@ -480,10 +485,16 @@ export function mountHandoff(host, book, hooks = {}) {
   }
 
   function renderStage() {
+    if (!format) {
+      stopReel();
+      stage.hidden = true;
+      stage.innerHTML = "";
+      return;
+    }
     stage.hidden = false;
     if (format === "video") {
-      stage.innerHTML = videoMarkup(book, pack?.masters);
-      if (!matchMedia("(prefers-reduced-motion: reduce)").matches) startReel();
+      stage.innerHTML = videoMarkup(book, pack?.xhs);
+      startReel();
       return;
     }
     stopReel();
@@ -511,10 +522,24 @@ export function mountHandoff(host, book, hooks = {}) {
     const button = event.target.closest("button");
     if (!button || button.disabled) return;
     if (button.dataset.format) {
+      if (format === button.dataset.format) {
+        format = "";
+        markTabs();
+        renderStage();
+        hooks.openBook?.();
+        return;
+      }
       format = button.dataset.format;
       hooks.closeBook?.();
       markTabs();
       renderStage();
+      return;
+    }
+    if (button.dataset.look != null) {
+      if (!pack) return;
+      const file = filesFor(pack, "moments")[Number(button.dataset.look)];
+      const hero = stage.querySelector("[data-hero]");
+      if (hero && file) hero.src = file.preview;
       return;
     }
     if (button.dataset.xhsStep || button.dataset.xhs != null) {
@@ -556,13 +581,9 @@ export function mountHandoff(host, book, hooks = {}) {
     }
     let files = null;
     let name = "";
-    if (button.dataset.one) {
-      const [group, index] = button.dataset.one.split(":");
-      files = [filesFor(pack, group)[Number(index)]];
-      name = files[0].name;
-    } else if (button.dataset.set) {
+    if (button.dataset.set) {
       files = filesFor(pack, button.dataset.set);
-      name = zipName(button.dataset.set, book.title);
+      name = files.length === 1 ? files[0].name : zipName(button.dataset.set, book.title);
     }
     if (!files?.[0]) return;
     button.disabled = true;
@@ -572,12 +593,10 @@ export function mountHandoff(host, book, hooks = {}) {
   };
 
   host.addEventListener("click", onClick);
-  renderStage();
   prepare(book, urls, () => cancelled).then((result) => {
     if (cancelled) return;
     pack = result;
-    mastersButton.disabled = false;
-    if (format === "moments" || format === "xhs" || format === "video") renderStage();
+    if (format) renderStage();
   }).catch((error) => {
     if (cancelled || error?.message === "cancelled") return;
     if (format !== "video") stage.innerHTML = `<p class="error">朋友圈和小红书这版没有准备好。</p>`;

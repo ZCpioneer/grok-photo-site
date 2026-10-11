@@ -27,8 +27,27 @@ export const sampleBook = {
 };
 
 export const FRAME = { width: 1080, height: 1440, imageHeight: 1008 };
-export const HOLD_MS = 3500;
 export const FADE_MS = 450;
+
+export function pageLabel(index, total) {
+  return `${index + 1} / ${total}`;
+}
+
+export function trackedWidth(text, fontSize, glyphWidth, trackingEm = 0) {
+  const chars = [...String(text)];
+  if (!chars.length) return 0;
+  const gap = trackingEm * fontSize;
+  let width = 0;
+  chars.forEach((char, index) => {
+    width += glyphWidth(char, fontSize);
+    if (index < chars.length - 1) width += gap;
+  });
+  return width;
+}
+
+export function videoLead(pages) {
+  return `竖屏，一页一页翻。${reelDurationLabel(pages)}`;
+}
 
 export function holdMs(page) {
   if (page?.kind === "cover") return 3000;
@@ -122,24 +141,40 @@ export function wrapLines(text, maxWidth, measure) {
   return lines.filter((item) => item);
 }
 
-export function layoutCopy(blocks, { width, top, bottom, measure, scale = width / 420 }) {
+export function layoutCopy(blocks, { width, top, bottom, measure, scale = width / 420, ranks }) {
   const maxWidth = width - 22 * scale * 2;
-  const build = (fontSize) => blocks.flatMap((block, index) => {
-    const lines = wrapLines(String(block).trim(), maxWidth, (text) => measure(text, fontSize));
-    return index ? ["", ...lines] : lines;
-  });
-  const used = (fontSize, lines) => {
-    const lineHeight = fontSize * 1.55;
-    return lines.reduce((sum, line) => sum + (line ? lineHeight : lineHeight * 0.4), 0);
-  };
-  let fontSize = 22 * scale;
   const minSize = 8 * scale;
-  let lines = build(fontSize);
-  while (fontSize > minSize && top + used(fontSize, lines) > bottom) {
-    fontSize -= 1;
-    lines = build(fontSize);
+  const bases = blocks.map((_, index) => (ranks && ranks[index] != null ? ranks[index] : 22));
+  const build = (sizes) => {
+    const lines = [];
+    const lineSizes = [];
+    const lineBlocks = [];
+    blocks.forEach((block, index) => {
+      const fontSize = sizes[index];
+      if (index) {
+        lines.push("");
+        lineSizes.push(fontSize);
+        lineBlocks.push(index);
+      }
+      wrapLines(String(block).trim(), maxWidth, (text) => measure(text, fontSize, index)).forEach((line) => {
+        lines.push(line);
+        lineSizes.push(fontSize);
+        lineBlocks.push(index);
+      });
+    });
+    return { lines, lineSizes, lineBlocks };
+  };
+  const used = (lines, lineSizes) => lines.reduce((sum, line, index) => {
+    const lineHeight = lineSizes[index] * 1.55;
+    return sum + (line ? lineHeight : lineHeight * 0.4);
+  }, 0);
+  let sizes = bases.map((rank) => rank * scale);
+  let built = build(sizes);
+  while (sizes.some((size) => size > minSize) && top + used(built.lines, built.lineSizes) > bottom) {
+    sizes = sizes.map((size) => Math.max(minSize, size - 1));
+    built = build(sizes);
   }
-  return { fontSize, lines };
+  return { fontSize: sizes[0] ?? 22 * scale, lines: built.lines, sizes, lineSizes: built.lineSizes, lineBlocks: built.lineBlocks };
 }
 
 export function moveDrawing(pages, index) {
@@ -229,7 +264,7 @@ export function draftMarkup(story, photosById) {
       : page.kind === "drawing"
         ? `<div class="actions"><button class="quiet" type="button" data-clear="${index}">改回照片</button></div>`
         : `<div class="actions"><button class="quiet" type="button" data-draw="${index}">改成画</button></div>`;
-    return `<section class="draft-page"><div class="essay-frame"><article class="essay-page">${mark}${image}${text}</article></div>${control}</section>`;
+    return `<section class="draft-page"><div class="essay-frame"><article class="essay-page essay-${page.kind}">${mark}${image}${text}</article></div>${control}</section>`;
   }).join("");
   const clear = hasDrawing ? `<button class="quiet" type="button" data-clear="all">都用原片</button>` : "";
   return `<p class="lead">字是替你起的稿，不对的地方直接改。</p>${pages}<div class="draft-bar"><button class="primary" type="button" data-choice="draw">就按这个做</button>${clear}<button class="quiet" type="button" data-choice="back">回到勾选</button></div>`;

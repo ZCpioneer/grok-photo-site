@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { FRAME, HOLD_MS, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook, readingShell, draftMarkup, pagesToStore, skipDrawing, exportSize, pageTurn, layoutCopy, holdMs, reelCues, reelDurationLabel, imageFit, placeImage, wrapLines, sentenceFields, sentenceMarkup, copyCountLabel, waitMarkup, reviewMarkup } from "../site/essay.js";
+import { FRAME, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook, readingShell, draftMarkup, pagesToStore, skipDrawing, exportSize, pageTurn, layoutCopy, holdMs, reelCues, reelDurationLabel, imageFit, placeImage, wrapLines, sentenceFields, sentenceMarkup, copyCountLabel, waitMarkup, reviewMarkup, pageLabel, trackedWidth, videoLead } from "../site/essay.js";
 
 test("frame and hold", () => {
   assert.deepEqual(FRAME, { width: 1080, height: 1440, imageHeight: 1008 });
-  assert.equal(HOLD_MS, 3500);
   assert.deepEqual(coverSize(1080, 1440), { width: 1125, height: 1500 });
 });
 
@@ -155,8 +154,24 @@ test("the reading column does not scroll the copy away", () => {
   const frame = css.split("\n").find((line) => line.startsWith(".essay-frame {"));
   const copy = css.split("\n").find((line) => line.startsWith(".essay-copy {"));
   assert.equal(frame.includes("overflow"), false);
-  assert.equal(frame.includes("aspect-ratio"), false);
+  assert.match(frame, /aspect-ratio:\s*1080\s*\/\s*1440/);
   assert.equal(copy.includes("overflow"), false);
+});
+
+test("cover type has two sizes and the page number sits under the frame", () => {
+  const scale = 1080 / 420;
+  const laid = layoutCopy(["试册", "雪停在远处，这一趟就从这里看过去。"], {
+    width: 1080,
+    top: 1008 + 16 * scale,
+    bottom: 1440 - 12 * scale,
+    ranks: [28, 22],
+    measure: (text, fontSize) => text.length * fontSize,
+  });
+  assert.equal(laid.sizes[0], 28 * scale);
+  assert.equal(laid.sizes[1], 22 * scale);
+  assert.equal(pageLabel(1, 4), "2 / 4");
+  assert.equal(trackedWidth("试册", 28, () => 28, 0.12), 59.36);
+  assert.equal(videoLead(sampleBook.pages), "竖屏，一页一页翻。约 28 秒");
 });
 
 test("exports keep the whole 3:4 page", () => {

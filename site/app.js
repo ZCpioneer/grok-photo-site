@@ -1,12 +1,27 @@
 import { choosePhotos } from "./filter.js";
 import { mountHandoff } from "./handoff.js";
-import { copyCountLabel, copyEditor, draftMarkup, essayMarkup, pageTurn, pagesToStore, readingShell, reviewMarkup, sampleBook as SAMPLE, sentenceFields, sentenceMarkup, skipDrawing, waitMarkup } from "./essay.js";
+import { copyCountLabel, copyEditor, draftMarkup, essayMarkup, imageFit, pageLabel, pageTurn, pagesToStore, readingShell, reviewMarkup, sampleBook as SAMPLE, sentenceFields, sentenceMarkup, skipDrawing, waitMarkup } from "./essay.js";
 
 const app = document.querySelector("#app");
 const hint = document.querySelector("#hint");
 let cleanup = () => {};
 let objectUrls = [];
 let viewToken = 0;
+
+function fitImages(root) {
+  root.querySelectorAll(".cover img, .essay-image").forEach((image) => {
+    const apply = () => {
+      if (!image.naturalWidth || !image.naturalHeight) return;
+      image.classList.remove("fit-cover", "fit-contain");
+      image.classList.add(`fit-${imageFit(image.naturalWidth, image.naturalHeight)}`);
+    };
+    if (image.dataset.fitBound !== "1") {
+      image.dataset.fitBound = "1";
+      image.addEventListener("load", apply);
+    }
+    if (image.complete) apply();
+  });
+}
 
 function escape(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({
@@ -191,6 +206,7 @@ async function showShelf(token) {
     ${warning ? `<p class="error">${warning}</p>` : ""}
     <div class="shelf">${cards}</div>
     <p class="lead">试册用的是公开图片，不是一趟真实旅行。</p>`);
+  fitImages(app);
   if (!alive(token)) return;
   const stored = albums.filter((book) => book.pages[0]);
   if (stored.length) {
@@ -204,6 +220,7 @@ async function showShelf(token) {
           const url = URL.createObjectURL(request.result);
           objectUrls.push(url);
           image.src = url;
+          fitImages(app);
         }
         resolve();
       };
@@ -248,8 +265,12 @@ function showReading(pages, meta) {
     const last = viewPages.length - 1;
     essay.innerHTML = `
       <button class="essay-nav prev" type="button" data-step="-1" ${index === 0 ? "disabled" : ""}>上一页</button>
-      <div class="essay-frame">${viewPages.length ? essayMarkup(viewPages[index]) : ""}</div>
+      <div class="essay-column">
+        <div class="essay-frame">${viewPages.length ? essayMarkup(viewPages[index]) : ""}</div>
+        <p class="page-label">${viewPages.length ? pageLabel(index, viewPages.length) : ""}</p>
+      </div>
       <button class="essay-nav next" type="button" data-step="1" ${index >= last ? "disabled" : ""}>下一页</button>`;
+    fitImages(essay);
   };
   const go = (step) => {
     const next = index + step;
@@ -480,6 +501,7 @@ async function confirmStory(token, session, story, back, chosen) {
         ${draftMarkup(current, photosById)}
         <p class="error" id="make-error" hidden></p>
       </div>`;
+    fitImages(app);
   };
   const showError = (reason) => {
     const error = app.querySelector("#make-error");
