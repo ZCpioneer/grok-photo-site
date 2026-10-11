@@ -1,4 +1,4 @@
-import { FADE_MS, FRAME, coverSize, exportSize, isLegacy, layoutCopy, placeImage, reelCues, trackedWidth, videoLead } from "./essay.js";
+import { FADE_MS, FRAME, coverSize, exportSize, isLegacy, layoutCopy, placeImage, reelCues, videoLead } from "./essay.js";
 
 const CRC_TABLE = new Uint32Array(256);
 for (let n = 0; n < 256; n += 1) {
@@ -109,7 +109,7 @@ function jpeg(canvas) {
 
 function paintEssay(ctx, image, page, size) {
   const { width, height } = size;
-  ctx.fillStyle = "#f3eedf";
+  ctx.fillStyle = "#f2f0ea";
   ctx.fillRect(0, 0, width, height);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
@@ -137,11 +137,8 @@ function paintEssay(ctx, image, page, size) {
     bottom,
     scale,
     ranks: page.kind === "cover" ? [28, 22] : undefined,
-    measure: (text, fontSize, blockIndex) => {
+    measure: (text, fontSize) => {
       ctx.font = `${fontSize}px ${typeface}`;
-      if (page.kind === "cover" && blockIndex === 0) {
-        return trackedWidth(text, fontSize, (char) => ctx.measureText(char).width, 0.12);
-      }
       return ctx.measureText(text).width;
     },
   });
@@ -151,19 +148,9 @@ function paintEssay(ctx, image, page, size) {
     const fontSize = laid.lineSizes[index];
     const lineHeight = fontSize * 1.55;
     if (line) {
-      const title = page.kind === "cover" && laid.lineBlocks[index] === 0;
       ctx.fillStyle = page.kind === "cover" && laid.lineBlocks[index] > 0 ? "#6f6e64" : "#282923";
       ctx.font = `${fontSize}px ${typeface}`;
-      if (title) {
-        let x = 22 * scale;
-        [...line].forEach((char, glyph) => {
-          ctx.fillText(char, x, y);
-          x += ctx.measureText(char).width;
-          if (glyph < [...line].length - 1) x += 0.12 * fontSize;
-        });
-      } else {
-        ctx.fillText(line, 22 * scale, y);
-      }
+      ctx.fillText(line, 22 * scale, y);
     }
     y += line ? lineHeight : lineHeight * 0.4;
   });
@@ -446,6 +433,7 @@ export function mountHandoff(host, book, hooks = {}) {
   let pack = null;
   let format = "";
   let xhsIndex = 0;
+  let momentsIndex = 0;
   let reelTimer = 0;
   const urls = [];
   host.innerHTML = handoffShell();
@@ -472,6 +460,7 @@ export function mountHandoff(host, book, hooks = {}) {
         images[index].classList.remove("on");
         images[next].classList.add("on");
         index = next;
+        hooks.onFrame?.(index, "video");
         reelTimer = window.setTimeout(arm, FADE_MS);
       }, hold);
     };
@@ -482,6 +471,18 @@ export function mountHandoff(host, book, hooks = {}) {
     host.querySelectorAll("[data-format]").forEach((button) => {
       button.setAttribute("aria-selected", button.dataset.format === format ? "true" : "false");
     });
+  }
+
+  function markMoment() {
+    if (!pack) return;
+    const files = filesFor(pack, "moments");
+    momentsIndex = Math.max(0, Math.min(files.length - 1, momentsIndex));
+    stage.querySelectorAll("[data-look]").forEach((button) => {
+      button.setAttribute("aria-current", Number(button.dataset.look) === momentsIndex ? "true" : "false");
+    });
+    const file = files[momentsIndex];
+    const hero = stage.querySelector("[data-hero]");
+    if (hero && file) hero.src = file.preview;
   }
 
   function renderStage() {
@@ -495,6 +496,7 @@ export function mountHandoff(host, book, hooks = {}) {
     if (format === "video") {
       stage.innerHTML = videoMarkup(book, pack?.xhs);
       startReel();
+      hooks.onFrame?.(0, "video");
       return;
     }
     stopReel();
@@ -505,9 +507,30 @@ export function mountHandoff(host, book, hooks = {}) {
     if (format === "xhs") {
       xhsIndex = Math.max(0, Math.min(pack.xhs.length - 1, xhsIndex));
       stage.innerHTML = xhsMarkup(pack, xhsIndex);
+      hooks.onFrame?.(xhsIndex, "xhs");
       return;
     }
     stage.innerHTML = momentsMarkup(pack);
+    markMoment();
+    hooks.onFrame?.(momentsIndex, "moments");
+  }
+
+  function show(index) {
+    if (format === "xhs" && pack) {
+      const next = Math.max(0, Math.min(pack.xhs.length - 1, index));
+      if (next === xhsIndex && stage.querySelector(".xhs-stage")) return;
+      xhsIndex = next;
+      renderStage();
+      return;
+    }
+    if (format === "moments" && pack) {
+      if (index === momentsIndex && stage.querySelector("[data-look]")) {
+        markMoment();
+        return;
+      }
+      momentsIndex = index;
+      markMoment();
+    }
   }
 
   function readBook() {
@@ -515,6 +538,8 @@ export function mountHandoff(host, book, hooks = {}) {
     format = "";
     markTabs();
     stage.hidden = true;
+    stage.innerHTML = "";
+    hooks.onMode?.("");
     hooks.openBook?.();
   }
 
@@ -523,23 +548,22 @@ export function mountHandoff(host, book, hooks = {}) {
     if (!button || button.disabled) return;
     if (button.dataset.format) {
       if (format === button.dataset.format) {
-        format = "";
-        markTabs();
-        renderStage();
-        hooks.openBook?.();
+        readBook();
         return;
       }
       format = button.dataset.format;
-      hooks.closeBook?.();
+      xhsIndex = 0;
+      momentsIndex = 0;
+      hooks.onMode?.(format);
       markTabs();
       renderStage();
       return;
     }
     if (button.dataset.look != null) {
       if (!pack) return;
-      const file = filesFor(pack, "moments")[Number(button.dataset.look)];
-      const hero = stage.querySelector("[data-hero]");
-      if (hero && file) hero.src = file.preview;
+      momentsIndex = Number(button.dataset.look);
+      markMoment();
+      hooks.onFrame?.(momentsIndex, "moments");
       return;
     }
     if (button.dataset.xhsStep || button.dataset.xhs != null) {
@@ -604,6 +628,7 @@ export function mountHandoff(host, book, hooks = {}) {
 
   return {
     readBook,
+    show,
     stop() {
       cancelled = true;
       stopReel();

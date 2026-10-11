@@ -1,5 +1,6 @@
 import { choosePhotos } from "./filter.js";
 import { mountHandoff } from "./handoff.js";
+import { labFromBlob, mixRooms, onRoom, roomFromImage, UNDEVELOPED } from "./light.js";
 import { copyCountLabel, copyEditor, draftMarkup, essayMarkup, fitRanks, imageFit, pageLabel, pageTurn, pagesToStore, readingShell, restoredSentence, reviewMarkup, sampleBook as SAMPLE, sentenceFields, sentenceMarkup, skipDrawing, waitMarkup } from "./essay.js";
 
 const app = document.querySelector("#app");
@@ -7,6 +8,29 @@ const hint = document.querySelector("#hint");
 let cleanup = () => {};
 let objectUrls = [];
 let viewToken = 0;
+let pendingFiles = null;
+let tripRoom = UNDEVELOPED;
+let shelfBase = UNDEVELOPED;
+
+function setScene(name) {
+  document.body.classList.remove("is-shelf", "is-make", "is-read", "is-missing", "is-format", "is-video");
+  document.body.classList.add(`is-${name}`);
+}
+
+function applyRoom(color) {
+  const room = color || UNDEVELOPED;
+  document.documentElement.style.setProperty("--room", room);
+  document.documentElement.style.setProperty("--on-room", onRoom(room));
+}
+
+function lightImage(image, { drawing = false } = {}) {
+  if (!image?.naturalWidth) return "";
+  try {
+    return roomFromImage(image, { drawing });
+  } catch {
+    return "";
+  }
+}
 
 function fitEssayFrames(root) {
   root.querySelectorAll(".essay-frame").forEach((frame) => {
@@ -189,6 +213,8 @@ function render(html) {
 }
 
 async function showShelf(token) {
+  setScene("shelf");
+  applyRoom(shelfBase);
   setHint("做完的册子留在这台浏览器里");
   let albums = [];
   let warning = "";
@@ -210,9 +236,11 @@ async function showShelf(token) {
   const cards = books.map((book) => {
     const cover = book.sample ? book.pages[0].url : "";
     const note = book.sample ? "效果样张" : `${book.pages.length} 页`;
+    const line = book.sentence ? `<span class="line">${escape(book.sentence)}</span>` : "";
     return `<button class="book-link" type="button" data-id="${escape(book.id)}" data-cover="${book.sample ? "" : "1"}">
       <span class="cover">${cover ? `<img src="${cover}" alt="">` : `<img alt="" data-poster="${escape(book.pages[0]?.posterId || "")}">`}</span>
       <strong>${escape(book.title)}</strong>
+      ${line}
       <small>${note}</small>
     </button>`;
   }).join("");
@@ -222,17 +250,17 @@ async function showShelf(token) {
       ? ""
       : `<p class="error">服务开着，但还没有接上画画的钥匙。已有的册子仍可以翻。</p>`;
   render(`
-    <div class="shelf-head">
-      <div>
-        <h1>书架</h1>
-        <p class="lead">一次丢进一趟旅行的照片。先确认一句故事，再做成图文。</p>
+    <div class="shelf-body">
+      <h1 class="vh">书架</h1>
+      <p class="lead">一次丢进一趟旅行的照片。先确认一句故事，再做成图文。</p>
+      ${healthNote}
+      ${warning ? `<p class="error">${warning}</p>` : ""}
+      <div class="row">
+        <a class="make-spine" href="#/make"><span>做一本</span></a>
+        ${cards}
       </div>
-      <a class="primary" href="#/make">做一本</a>
-    </div>
-    ${healthNote}
-    ${warning ? `<p class="error">${warning}</p>` : ""}
-    <div class="shelf">${cards}</div>
-    <p class="lead">试册用的是公开图片，不是一趟真实旅行。</p>`);
+      <p class="foot">试册用的是公开图片，不是一趟真实旅行。</p>
+    </div>`);
   fitImages(app);
   if (!alive(token)) return;
   const stored = albums.filter((book) => book.pages[0]);
@@ -255,17 +283,54 @@ async function showShelf(token) {
     })));
     db.close();
   }
+  const lightCover = (image, button) => {
+    const room = lightImage(image, { drawing: false });
+    if (!room || !alive(token)) return;
+    button.dataset.room = room;
+    if (button === app.querySelector(".book-link")) {
+      shelfBase = room;
+      if (document.body.classList.contains("is-shelf")) applyRoom(room);
+    }
+  };
   app.querySelectorAll(".book-link").forEach((button) => {
+    const image = button.querySelector("img");
+    const arm = () => lightCover(image, button);
+    if (image?.complete && image.naturalWidth) arm();
+    else image?.addEventListener("load", arm, { once: true });
     button.addEventListener("click", () => {
       location.hash = `#/read/${encodeURIComponent(button.dataset.id)}`;
     });
+    button.addEventListener("pointerenter", () => {
+      if (button.dataset.room) applyRoom(button.dataset.room);
+    });
+    button.addEventListener("pointerleave", () => {
+      if (document.body.classList.contains("is-shelf")) applyRoom(shelfBase);
+    });
+  });
+  const spine = app.querySelector(".make-spine");
+  spine.addEventListener("pointerenter", () => applyRoom(UNDEVELOPED));
+  spine.addEventListener("pointerleave", () => {
+    if (document.body.classList.contains("is-shelf")) applyRoom(shelfBase);
+  });
+  spine.addEventListener("dragover", (event) => {
+    event.preventDefault();
+    spine.classList.add("over");
+  });
+  spine.addEventListener("dragleave", () => spine.classList.remove("over"));
+  spine.addEventListener("drop", (event) => {
+    event.preventDefault();
+    spine.classList.remove("over");
+    pendingFiles = event.dataTransfer.files;
+    location.hash = "#/make";
   });
 }
 
 function showMissing() {
+  setScene("missing");
+  applyRoom(UNDEVELOPED);
   setHint("这本不在这台浏览器里");
   render(`
-    <div class="card">
+    <div class="flow">
       <h1>没有这本册子</h1>
       <p class="lead">它可能在另一台浏览器里，或者还没有画完。</p>
       <div class="actions"><a class="primary" href="#/">回书架</a></div>
@@ -273,6 +338,8 @@ function showMissing() {
 }
 
 function showReading(pages, meta) {
+  setScene("read");
+  applyRoom(UNDEVELOPED);
   setHint("先读这篇");
   render(readingShell());
   const viewPages = pages.map((page) => {
@@ -287,26 +354,64 @@ function showReading(pages, meta) {
     return { ...view, url };
   });
   const essay = app.querySelector("#essay");
-  let index = 0;
+  const stage = app.querySelector(".read-stage");
+  const under = app.querySelector(".under");
+  const count = app.querySelector("#count");
+  const last = viewPages.length - 1;
+  let readIndex = 0;
+  let fileIndex = 0;
+  let mode = "";
+  let reached = false;
+  let syncing = false;
+  let swiped = false;
+  let downX = 0;
+  let downY = 0;
+  const at = () => (mode && mode !== "video" ? fileIndex : readIndex);
+  const unit = () => (mode && mode !== "video" ? "张" : "页");
+  const lightPage = (page) => {
+    const image = essay.querySelector(".essay-image");
+    const apply = () => {
+      const room = lightImage(image, { drawing: page?.kind === "drawing" });
+      if (room && document.body.classList.contains("is-read")) applyRoom(room);
+    };
+    if (image?.complete && image.naturalWidth) apply();
+    else image?.addEventListener("load", apply, { once: true });
+  };
   const paint = () => {
-    const last = viewPages.length - 1;
+    const index = at();
+    if (!mode && index === last) reached = true;
+    under.classList.toggle("unread", !reached && !mode);
+    count.hidden = mode === "video";
+    count.textContent = viewPages.length ? pageLabel(index, viewPages.length) : "";
     essay.innerHTML = `
-      <button class="essay-nav prev" type="button" data-step="-1" ${index === 0 ? "disabled" : ""}>上一页</button>
+      <button class="essay-nav prev" type="button" data-step="-1" ${index === 0 || mode === "video" ? "disabled" : ""}>上一${unit()}</button>
       <div class="essay-column">
         <div class="essay-frame">${viewPages.length ? essayMarkup(viewPages[index]) : ""}</div>
-        <p class="page-label">${viewPages.length ? pageLabel(index, viewPages.length) : ""}</p>
       </div>
-      <button class="essay-nav next" type="button" data-step="1" ${index >= last ? "disabled" : ""}>下一页</button>`;
+      <button class="essay-nav next" type="button" data-step="1" ${index >= last || mode === "video" ? "disabled" : ""}>下一${unit()}</button>`;
     fitImages(essay);
     fitEssayFrames(essay);
+    lightPage(viewPages[index]);
+    if (!syncing && mode && mode !== "video") {
+      syncing = true;
+      handoff.show?.(index);
+      syncing = false;
+    }
   };
   const go = (step) => {
-    const next = index + step;
+    if (mode === "video") return;
+    const next = at() + step;
     if (next < 0 || next >= viewPages.length) return;
-    index = next;
+    if (mode) fileIndex = next;
+    else readIndex = next;
     paint();
   };
   essay.addEventListener("click", (event) => {
+    if (mode === "video") return;
+    if (swiped) {
+      swiped = false;
+      return;
+    }
     const button = event.target.closest("[data-step]");
     if (button) {
       if (!button.disabled) go(Number(button.dataset.step));
@@ -321,12 +426,75 @@ function showReading(pages, meta) {
     );
     if (step) go(step);
   });
+  essay.addEventListener("pointermove", (event) => {
+    if (event.pointerType !== "mouse" || mode === "video") {
+      stage.dataset.hover = "";
+      return;
+    }
+    const frame = essay.querySelector(".essay-frame");
+    if (!frame || !event.target.closest(".essay-image")) {
+      stage.dataset.hover = "";
+      return;
+    }
+    const box = frame.getBoundingClientRect();
+    stage.dataset.hover = event.clientX < box.left + box.width / 2 ? "prev" : "next";
+  });
+  essay.addEventListener("pointerleave", () => {
+    stage.dataset.hover = "";
+  });
+  essay.addEventListener("pointerdown", (event) => {
+    downX = event.clientX;
+    downY = event.clientY;
+  });
+  essay.addEventListener("pointerup", (event) => {
+    if (event.pointerType === "mouse") return;
+    const dx = event.clientX - downX;
+    const dy = event.clientY - downY;
+    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+      swiped = true;
+      go(dx < 0 ? 1 : -1);
+    }
+  });
+  const onKey = (event) => {
+    if (!document.body.classList.contains("is-read")) return;
+    if (event.key === "ArrowLeft") go(-1);
+    if (event.key === "ArrowRight") go(1);
+    if (event.key === "Escape" && mode) handoff.readBook();
+  };
+  window.addEventListener("keydown", onKey);
+  const handoff = mountHandoff(app.querySelector("#handoff"), { ...meta, pages: viewPages }, {
+    onMode(next) {
+      mode = next || "";
+      document.body.classList.toggle("is-format", Boolean(mode));
+      document.body.classList.toggle("is-video", mode === "video");
+      if (mode) fileIndex = 0;
+      paint();
+    },
+    onFrame(index, source) {
+      if (source === "video") {
+        const page = viewPages[index];
+        if (!page) return;
+        const image = new Image();
+        image.onload = () => {
+          const room = lightImage(image, { drawing: page.kind === "drawing" });
+          if (room && document.body.classList.contains("is-video")) applyRoom(room);
+        };
+        image.src = page.url;
+        return;
+      }
+      if (syncing || index === fileIndex) return;
+      fileIndex = index;
+      syncing = true;
+      paint();
+      syncing = false;
+    },
+  });
   paint();
   const onResize = () => fitEssayFrames(essay);
   window.addEventListener("resize", onResize);
-  const handoff = mountHandoff(app.querySelector("#handoff"), { ...meta, pages: viewPages });
   cleanup = () => {
     window.removeEventListener("resize", onResize);
+    window.removeEventListener("keydown", onKey);
     handoff.stop();
   };
 }
@@ -376,16 +544,17 @@ function waitForChoice(root) {
 }
 
 async function showMake(token) {
+  setScene("make");
+  applyRoom(tripRoom);
   setHint("先确认这篇图文");
   render(`
-    <div class="card">
-      <h1>做一本</h1>
-      <p class="lead">一次丢进这一趟的照片。模糊和几乎重复的会先在这台电脑上去掉，只把少数几张送去看。这里不会铺开照片墙。</p>
+    <div class="make-stage">
       <label class="drop" id="drop">
         <strong>把照片拖到这里</strong>
         <span>也可以点这里选。只要 jpg、png、webp。</span>
         <input id="files" type="file" accept="image/jpeg,image/png,image/webp" multiple hidden>
       </label>
+      <p class="make-lead">一次丢进这一趟的照片。模糊和几乎重复的会先在这台电脑上去掉，只把少数几张送去看。这里不会铺开照片墙。</p>
       <p class="error" id="make-error" hidden></p>
     </div>`);
   const drop = app.querySelector("#drop");
@@ -411,6 +580,9 @@ async function showMake(token) {
     begin(event.dataTransfer.files);
   });
   input.addEventListener("change", () => begin(input.files));
+  const queued = pendingFiles;
+  pendingFiles = null;
+  if (queued?.length) begin(queued);
 
   async function begin(fileList) {
     if (started || !alive(token) || !fileList?.length) return;
@@ -437,10 +609,25 @@ async function showMake(token) {
       if (alive(token)) fail(reason.message);
       return;
     }
+    const labs = [];
     for (let index = 0; index < chosen.kept.length; index += 1) {
       if (!alive(token)) return;
       drop.innerHTML = `<strong>正在看第 ${index + 1} 张</strong><span>共 ${chosen.kept.length} 张。还不会画。</span>`;
       try {
+        try {
+          const lab = await labFromBlob(chosen.kept[index].blob);
+          if (lab) labs.push(lab);
+        } catch {
+          /* this photo gives no light */
+        }
+        if (labs.length) {
+          const mixed = mixRooms(labs);
+          const meanL = labs.reduce((sum, item) => sum + item[0], 0) / labs.length;
+          drop.style.setProperty("--trip", mixed.trip);
+          drop.classList.toggle("lit", meanL > 0.72);
+          tripRoom = mixed.room;
+          applyRoom(mixed.room);
+        }
         const data = await dataUrl(chosen.kept[index].blob);
         await post("/api/photo", { session, id: chosen.kept[index].id, data });
       } catch (reason) {
@@ -463,8 +650,10 @@ async function showMake(token) {
 
 async function confirmSentence(token, session, draft, chosen, prior = {}) {
   if (!alive(token)) return;
+  setScene("make");
+  applyRoom(tripRoom);
   render(`
-    <div class="card">
+    <div class="flow">
       ${sentenceMarkup(sentenceFields(draft, prior))}
       <p class="lead">留下 ${chosen.kept.length} 张，其余 ${chosen.dropped} 张已在本机放下。</p>
       <p class="error" id="make-error" hidden></p>
@@ -518,6 +707,8 @@ async function confirmSentence(token, session, draft, chosen, prior = {}) {
 
 async function confirmStory(token, session, story, back, chosen) {
   if (!alive(token)) return;
+  setScene("make");
+  applyRoom(tripRoom);
   const urls = [];
   const photosById = new Map();
   for (const photo of chosen?.kept || []) {
@@ -534,7 +725,7 @@ async function confirmStory(token, session, story, back, chosen) {
   };
   const paint = () => {
     app.innerHTML = `
-      <div class="card">
+      <div class="flow draft-flow">
         ${draftMarkup(current, photosById)}
         <p class="error" id="make-error" hidden></p>
       </div>`;
@@ -672,6 +863,8 @@ async function confirmStory(token, session, story, back, chosen) {
 }
 
 async function drawBook(token, session, story, chosen) {
+  setScene("make");
+  applyRoom(tripRoom);
   const kept = new Map((chosen?.kept || []).map((photo) => [photo.id, photo.blob]));
   let pages = story.pages.map((page) => ({ ...page }));
   const made = [];
@@ -687,7 +880,7 @@ async function drawBook(token, session, story, chosen) {
     let skipped = false;
     try {
       while (!blob && !skipped && alive(token)) {
-        render(`<div class="card">${waitMarkup(story.title, index, sourceUrl)}</div>`);
+        render(`<div class="flow wait-flow">${waitMarkup(story.title, index, sourceUrl)}</div>`);
         try {
           const result = await post("/api/poster", { session, index });
           const response = await fetch(result.url);
@@ -696,7 +889,7 @@ async function drawBook(token, session, story, chosen) {
           const drawnUrl = URL.createObjectURL(drawnBlob);
           try {
             render(`
-              <div class="card">
+              <div class="flow">
                 <p class="kicker">${escape(story.title)}</p>
                 <div class="review-pair">
                   <img src="${escape(drawnUrl)}" alt="">
@@ -721,7 +914,7 @@ async function drawBook(token, session, story, chosen) {
         } catch (reason) {
           if (!alive(token)) return;
           render(`
-            <div class="card">
+            <div class="flow">
               <p class="kicker">${escape(story.title)}</p>
               <p class="sentence">这一页没有画成</p>
               <p class="error">${escape(reason.message)}</p>
@@ -748,7 +941,7 @@ async function drawBook(token, session, story, chosen) {
   if (!alive(token)) return;
   if (!made.length) {
     render(`
-      <div class="card">
+      <div class="flow">
         <h1>这本还没有页</h1>
         <p class="lead">一页原片都没有留下来，所以没有放上书架。</p>
         <div class="actions"><a class="primary" href="#/make">重新丢照片</a></div>
@@ -767,7 +960,7 @@ async function drawBook(token, session, story, chosen) {
   } catch {
     if (!alive(token)) return;
     render(`
-      <div class="card">
+      <div class="flow">
         <h1>册子画好了，但没有放进书架</h1>
         <p class="error">这台浏览器拒绝保存图片。</p>
         <div class="actions"><a class="primary" href="#/">回书架</a></div>
