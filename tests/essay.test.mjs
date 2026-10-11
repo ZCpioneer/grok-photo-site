@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { FRAME, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook, readingShell, draftMarkup, pagesToStore, skipDrawing, exportSize, pageTurn, layoutCopy, holdMs, reelCues, reelDurationLabel, imageFit, placeImage, wrapLines, sentenceFields, sentenceMarkup, copyCountLabel, waitMarkup, reviewMarkup, pageLabel, trackedWidth, videoLead } from "../site/essay.js";
+import { FRAME, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook, readingShell, draftMarkup, pagesToStore, skipDrawing, exportSize, pageTurn, layoutCopy, holdMs, reelCues, reelDurationLabel, imageFit, placeImage, wrapLines, sentenceFields, sentenceMarkup, copyCountLabel, waitMarkup, reviewMarkup, pageLabel, trackedWidth, videoLead, fitRanks, restoredSentence } from "../site/essay.js";
 
 test("frame and hold", () => {
   assert.deepEqual(FRAME, { width: 1080, height: 1440, imageHeight: 1008 });
@@ -172,6 +172,23 @@ test("cover type has two sizes and the page number sits under the frame", () => 
   assert.equal(pageLabel(1, 4), "2 / 4");
   assert.equal(trackedWidth("试册", 28, () => 28, 0.12), 59.36);
   assert.equal(videoLead(sampleBook.pages), "竖屏，一页一页翻。约 28 秒");
+});
+
+test("screen type shrinks together and stops at eight", () => {
+  assert.deepEqual(fitRanks([28, 22], 1, () => false), [28, 22]);
+  assert.deepEqual(fitRanks([28, 22], 1, (current) => current[1] > 16), [22, 16]);
+  assert.deepEqual(fitRanks([28, 22], 1, () => true), [8, 8]);
+  const source = readFileSync(new URL("../site/app.js", import.meta.url), "utf8");
+  assert.match(source, /fitRanks\(/);
+});
+
+test("each open editor is saved, and back keeps the cover line", () => {
+  assert.equal(restoredSentence("旧句", undefined), "旧句");
+  assert.equal(restoredSentence("旧句", "新句"), "新句");
+  assert.equal(restoredSentence("旧句", ""), "");
+  const source = readFileSync(new URL("../site/app.js", import.meta.url), "utf8");
+  assert.match(source, /querySelectorAll\("\[data-editor\]"\)/);
+  assert.match(source, /restoredSentence\(current\.sentence/);
 });
 
 test("exports keep the whole 3:4 page", () => {

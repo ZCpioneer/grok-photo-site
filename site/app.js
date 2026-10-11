@@ -1,6 +1,6 @@
 import { choosePhotos } from "./filter.js";
 import { mountHandoff } from "./handoff.js";
-import { copyCountLabel, copyEditor, draftMarkup, essayMarkup, imageFit, pageLabel, pageTurn, pagesToStore, readingShell, reviewMarkup, sampleBook as SAMPLE, sentenceFields, sentenceMarkup, skipDrawing, waitMarkup } from "./essay.js";
+import { copyCountLabel, copyEditor, draftMarkup, essayMarkup, fitRanks, imageFit, pageLabel, pageTurn, pagesToStore, readingShell, restoredSentence, reviewMarkup, sampleBook as SAMPLE, sentenceFields, sentenceMarkup, skipDrawing, waitMarkup } from "./essay.js";
 
 const app = document.querySelector("#app");
 const hint = document.querySelector("#hint");
@@ -8,12 +8,39 @@ let cleanup = () => {};
 let objectUrls = [];
 let viewToken = 0;
 
+function fitEssayFrames(root) {
+  root.querySelectorAll(".essay-frame").forEach((frame) => {
+    const page = frame.querySelector(".essay-page");
+    const copy = page?.querySelector(".essay-copy");
+    if (!page || !copy) return;
+    const width = frame.clientWidth;
+    if (!width) return;
+    const scale = width / 420;
+    const cover = page.classList.contains("essay-cover");
+    const nodes = [...copy.children].filter((node) => node.matches("h1, p"));
+    if (!nodes.length) return;
+    const ranks = nodes.map((node) => (cover && node.tagName === "H1" ? 28 : 22));
+    const limit = width * 1440 / 1080;
+    const sizes = fitRanks(ranks, scale, (current) => {
+      nodes.forEach((node, index) => {
+        node.style.fontSize = `${current[index]}px`;
+      });
+      const image = page.querySelector(".essay-image");
+      return (image?.offsetHeight || 0) + copy.offsetHeight > limit + 1;
+    });
+    nodes.forEach((node, index) => {
+      node.style.fontSize = `${sizes[index]}px`;
+    });
+  });
+}
+
 function fitImages(root) {
   root.querySelectorAll(".cover img, .essay-image").forEach((image) => {
     const apply = () => {
       if (!image.naturalWidth || !image.naturalHeight) return;
       image.classList.remove("fit-cover", "fit-contain");
       image.classList.add(`fit-${imageFit(image.naturalWidth, image.naturalHeight)}`);
+      if (image.classList.contains("essay-image")) fitEssayFrames(app);
     };
     if (image.dataset.fitBound !== "1") {
       image.dataset.fitBound = "1";
@@ -271,6 +298,7 @@ function showReading(pages, meta) {
       </div>
       <button class="essay-nav next" type="button" data-step="1" ${index >= last ? "disabled" : ""}>下一页</button>`;
     fitImages(essay);
+    fitEssayFrames(essay);
   };
   const go = (step) => {
     const next = index + step;
@@ -294,8 +322,13 @@ function showReading(pages, meta) {
     if (step) go(step);
   });
   paint();
+  const onResize = () => fitEssayFrames(essay);
+  window.addEventListener("resize", onResize);
   const handoff = mountHandoff(app.querySelector("#handoff"), { ...meta, pages: viewPages });
-  cleanup = () => handoff.stop();
+  cleanup = () => {
+    window.removeEventListener("resize", onResize);
+    handoff.stop();
+  };
 }
 
 async function showBook(token, id) {
@@ -465,7 +498,11 @@ async function confirmSentence(token, session, draft, chosen, prior = {}) {
           token,
           session,
           story,
-          () => confirmSentence(token, session, draft, chosen, { sentence, note, answers }),
+          (latest) => confirmSentence(token, session, draft, chosen, {
+            sentence: latest?.sentence ?? sentence,
+            note,
+            answers,
+          }),
           chosen,
         );
       }
@@ -502,6 +539,7 @@ async function confirmStory(token, session, story, back, chosen) {
         <p class="error" id="make-error" hidden></p>
       </div>`;
     fitImages(app);
+    fitEssayFrames(app);
   };
   const showError = (reason) => {
     const error = app.querySelector("#make-error");
@@ -510,13 +548,14 @@ async function confirmStory(token, session, story, back, chosen) {
     error.textContent = reason.message;
   };
   const saveEditor = async () => {
-    const editor = app.querySelector("[data-editor]");
-    if (!editor) return;
-    current = await post("/api/copy", {
-      session,
-      index: Number(editor.dataset.editor),
-      copy: editor.value,
-    });
+    const editors = [...app.querySelectorAll("[data-editor]")];
+    for (const editor of editors) {
+      current = await post("/api/copy", {
+        session,
+        index: Number(editor.dataset.editor),
+        copy: editor.value,
+      });
+    }
   };
   let drew = false;
   let resolveDrawn = () => {};
@@ -538,8 +577,20 @@ async function confirmStory(token, session, story, back, chosen) {
     const edit = event.target.closest("[data-edit]");
     if (edit) {
       const index = Number(edit.dataset.edit);
+      if (app.querySelector("[data-editor]")) {
+        try {
+          await saveEditor();
+          if (!alive(token)) return;
+          paint();
+        } catch (reason) {
+          if (alive(token)) showError(reason);
+          return;
+        }
+      }
+      const target = app.querySelector(`[data-edit="${index}"]`);
+      if (!target) return;
       const copy = index === 0 ? (current.sentence || current.pages[0]?.copy || "") : (current.pages[index]?.copy || "");
-      edit.closest(".essay-copy").innerHTML = index === 0
+      target.closest(".essay-copy").innerHTML = index === 0
         ? `<h1>${escape(current.title || "")}</h1>${copyEditor(index, copy)}`
         : copyEditor(index, copy);
       return;
@@ -595,11 +646,14 @@ async function confirmStory(token, session, story, back, chosen) {
     }
   };
   paint();
+  const onResize = () => fitEssayFrames(app);
+  window.addEventListener("resize", onResize);
   app.addEventListener("click", onDraw);
   app.addEventListener("click", onChoose);
   app.addEventListener("input", onInput);
   const prior = cleanup;
   cleanup = () => {
+    window.removeEventListener("resize", onResize);
     app.removeEventListener("click", onDraw);
     app.removeEventListener("click", onChoose);
     app.removeEventListener("input", onInput);
@@ -610,7 +664,8 @@ async function confirmStory(token, session, story, back, chosen) {
   const choice = await Promise.race([drawn, waitForChoice(app)]);
   if (!alive(token) || !choice) return;
   if (choice === "back") {
-    await back();
+    const coverEditor = app.querySelector('[data-editor="0"]');
+    await back({ sentence: restoredSentence(current.sentence, coverEditor ? coverEditor.value : undefined) });
     return;
   }
   await drawBook(token, session, current, chosen);

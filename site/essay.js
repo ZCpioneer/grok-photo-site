@@ -33,6 +33,22 @@ export function pageLabel(index, total) {
   return `${index + 1} / ${total}`;
 }
 
+export function fitRanks(ranks, scale, tooTall) {
+  const minSize = 8 * scale;
+  let sizes = ranks.map((rank) => rank * scale);
+  let guard = 0;
+  while (tooTall(sizes) && sizes.some((size) => size > minSize) && guard < 400) {
+    sizes = sizes.map((size) => Math.max(minSize, size - 1));
+    guard += 1;
+  }
+  return sizes;
+}
+
+export function restoredSentence(storySentence, editorValue) {
+  if (editorValue != null) return editorValue;
+  return storySentence ?? "";
+}
+
 export function trackedWidth(text, fontSize, glyphWidth, trackingEm = 0) {
   const chars = [...String(text)];
   if (!chars.length) return 0;
