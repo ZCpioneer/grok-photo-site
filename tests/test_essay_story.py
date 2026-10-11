@@ -101,3 +101,25 @@ class AssignDrawingTest(unittest.TestCase):
         pages = [{}, {"draw": False}, {"draw": True}]
         server.assign_drawing(pages)
         self.assertEqual([page["kind"] for page in pages], ["cover", "photo", "drawing"])
+
+    def test_no_flag_leaves_every_body_page_a_photo(self):
+        pages = [{}, {}, {}]
+        server.assign_drawing(pages)
+        self.assertEqual([page["kind"] for page in pages], ["cover", "photo", "photo"])
+
+
+class StoryPromptTest(unittest.TestCase):
+    def test_rules_keep_the_second_sentence_off_the_photo(self):
+        self.assertIn("第二句只写照片里没有的", server.STORY_RULES)
+        self.assertIn("至多一页", server.STORY_RULES)
+        self.assertNotIn("纸刊", server.STORY_RULES)
+        self.assertNotIn("只有一页 draw 为 true", server.STORY_RULES)
+        session = {"sentence": "雪停在远处。", "photos": []}
+        prompt = server.story_prompt(session, [], [], "雾很冷")
+        self.assertIn(server.STORY_RULES, prompt)
+        self.assertIn("雪停在远处。", prompt)
+        self.assertIn("雾很冷", prompt)
+        self.assertIn("没有额外情节", prompt)
+
+    def test_none_check_names_the_events(self):
+        self.assertEqual(server.none_check(), {"id": "none", "text": "这几件都没发生"})

@@ -171,10 +171,17 @@ def build_sentence(session: dict) -> dict:
         text = str(item.get("text", "")).strip()
         if text:
             checks.append({"id": str(item.get("id") or f"c{len(checks)+1}"), "text": text[:24]})
-    checks.append({"id": "none", "text": "都没有，故事不是这样"})
+    checks.append(none_check())
     session["sentence"] = str(result.get("sentence", "")).strip()[:80]
     session["checks"] = checks
     return {"sentence": session["sentence"], "checks": checks}
+
+
+NONE_TEXT = "这几件都没发生"
+
+
+def none_check() -> dict:
+    return {"id": "none", "text": NONE_TEXT}
 
 
 FALLBACK_COPY = "这一页先停在看见的地方，别的都先不添上去。照片没说完的那一点，先留在这一页里面。"
@@ -203,7 +210,12 @@ def assign_drawing(pages: list[dict]) -> None:
     if len(pages) == 1:
         return
     flagged = [index for index, page in enumerate(pages) if index > 0 and page.get("draw")]
-    chosen = flagged[0] if len(flagged) == 1 else max(1, (len(pages) - 1) // 2)
+    if len(flagged) == 1:
+        chosen = flagged[0]
+    elif not flagged:
+        chosen = None
+    else:
+        chosen = max(1, (len(pages) - 1) // 2)
     for index, page in enumerate(pages):
         if index == 0:
             continue
@@ -261,6 +273,36 @@ def normalize_story(result: dict, photos: list[dict], sentence: str) -> dict:
     return {"title": title, "sentence": cover, "pages": pages}
 
 
+STORY_RULES = (
+    "把这趟旅行排成一篇图文的顺序。只使用给出的照片 id。"
+    "不要按文件名排序，按回忆的先后。被否定的情节不要写成一页。"
+    "第一句只写这张照片里看得见的。"
+    "第二句只写照片里没有的声音、气味、温度或画框外面，不写人做了什么。"
+    "人做了什么，只有用户补的那一句里写过，才能写进来。"
+    "正文是两句中文，40 到 70 字，恰好两个句末符号。"
+    "draw 为 true 的正文页可以没有，至多一页。第一页不要画。"
+)
+
+
+def story_prompt(session: dict, kept: list[str], rejected: list[str], note: str) -> str:
+    limit = min(MAX_PAGES, len(session["photos"]))
+    photos = "\n".join(
+        f"id={photo['id']} nucleus={photo['reading']['nucleus']} "
+        f"anchors={photo['reading']['anchors']} discard={photo['reading']['discard']}"
+        for photo in session["photos"]
+    )
+    return (
+        f"{STORY_RULES}最多 {limit} 页，可以更少。"
+        "JSON："
+        '{"title":"中文书名","pages":[{"photoId":"","copy":"","draw":false}]}'
+        f"\n已确认的一句话：{session['sentence']}"
+        f"\n用户认下的情节：{kept or '没有额外情节'}"
+        f"\n用户否定的情节：{rejected or '没有'}"
+        f"\n用户补的一句：{note or '没有'}"
+        f"\n照片：\n{photos}"
+    )
+
+
 def build_story(session: dict, answers: dict, note: str) -> dict:
     kept = []
     rejected = []
@@ -270,29 +312,8 @@ def build_story(session: dict, answers: dict, note: str) -> dict:
         (kept if answers.get(item["id"]) else rejected).append(item["text"])
     if answers.get("none"):
         kept.clear()
-    photos = "\n".join(
-        f"id={photo['id']} nucleus={photo['reading']['nucleus']} anchors={photo['reading']['anchors']} discard={photo['reading']['discard']}"
-        for photo in session["photos"]
-    )
     result = chat(
-        [
-            {
-                "role": "user",
-                "content": (
-                    "把这趟旅行排成一本纸刊的顺序。只使用给出的照片 id。"
-                    f"最多 {min(MAX_PAGES, len(session['photos']))} 页，可以更少。不要按文件名排序，按回忆的先后。"
-                    "被否定的情节不要写成一页。"
-                    "正文是两句中文，40 到 70 字。只有一页 draw 为 true，且第一页不要画。"
-                    "JSON："
-                    '{"title":"中文书名","pages":[{"photoId":"","copy":"","draw":false}]}'
-                    f"\n已确认的一句话：{session['sentence']}"
-                    f"\n用户认下的情节：{kept or '没有额外情节'}"
-                    f"\n用户否定的情节：{rejected or '没有'}"
-                    f"\n用户补的一句：{note or '没有'}"
-                    f"\n照片：\n{photos}"
-                ),
-            }
-        ],
+        [{"role": "user", "content": story_prompt(session, kept, rejected, note)}],
         2500,
     )
     session["story"] = normalize_story(result, session["photos"], str(session.get("sentence") or ""))
