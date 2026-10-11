@@ -188,6 +188,60 @@ FALLBACK_COPY = "这一页先停在看见的地方，别的都先不添上去。
 _ENDERS = "。？！"
 
 
+def author_sentence(text: str) -> str:
+    raw = str(text)
+    cleaned = raw.strip()
+    if "\n" in raw or len(cleaned) > 80 or re.search(r"[A-Za-z]", cleaned):
+        raise RuntimeError("这句话先改成中文，80 字以内")
+    return cleaned
+
+
+def author_copy(text: str) -> str:
+    raw = str(text)
+    cleaned = raw.strip()
+    enders = sum(cleaned.count(mark) for mark in _ENDERS)
+    if (
+        not cleaned
+        or "\n" in raw
+        or re.search(r"[A-Za-z]", cleaned)
+        or enders != 2
+        or cleaned[-1:] not in _ENDERS
+        or len(cleaned) > 80
+    ):
+        raise RuntimeError("这一页要正好两句，80 字以内")
+    return cleaned
+
+
+def take_sentence(session: dict, payload: dict) -> None:
+    if "sentence" in payload:
+        session["sentence"] = author_sentence(payload.get("sentence"))
+
+
+def set_copy(session: dict, index: int, copy: str) -> dict:
+    pages = session["story"]["pages"]
+    if index < 0 or index >= len(pages):
+        raise RuntimeError("没有这一页")
+    if index == 0:
+        sentence = author_sentence(copy)
+        pages[0]["copy"] = sentence
+        session["story"]["sentence"] = sentence
+        session["sentence"] = sentence
+    else:
+        pages[index]["copy"] = author_copy(copy)
+    return session["story"]
+
+
+def clear_drawing(session: dict) -> dict:
+    pages = session["story"]["pages"]
+    for index, page in enumerate(pages):
+        if index == 0:
+            page["kind"] = "cover"
+        else:
+            page["kind"] = "photo"
+            page["draw"] = False
+    return session["story"]
+
+
 def fit_copy(text: str, nucleus: str) -> str:
     del nucleus
     cleaned = str(text).strip()
@@ -433,9 +487,17 @@ class Handler(SimpleHTTPRequestHandler):
             if self.path == "/api/story":
                 answers = payload.get("answers") or {}
                 note = str(payload.get("note") or "")[:200]
+                take_sentence(session, payload)
                 self.end_json(200, build_story(session, answers, note))
                 return
+            if self.path == "/api/copy":
+                index = int(payload.get("index"))
+                self.end_json(200, set_copy(session, index, payload.get("copy")))
+                return
             if self.path == "/api/drawing":
+                if payload.get("clear"):
+                    self.end_json(200, clear_drawing(session))
+                    return
                 index = int(payload.get("index"))
                 self.end_json(200, set_drawing(session, index))
                 return

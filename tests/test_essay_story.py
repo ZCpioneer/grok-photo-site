@@ -123,3 +123,54 @@ class StoryPromptTest(unittest.TestCase):
 
     def test_none_check_names_the_events(self):
         self.assertEqual(server.none_check(), {"id": "none", "text": "这几件都没发生"})
+
+
+class AuthorCopyTest(unittest.TestCase):
+    def test_cover_sentence_can_be_empty_and_rejects_ascii(self):
+        self.assertEqual(server.author_sentence("  雪停在远处。  "), "雪停在远处。")
+        self.assertEqual(server.author_sentence(""), "")
+        self.assertEqual(len(server.author_sentence("句" * 80)), 80)
+        with self.assertRaisesRegex(RuntimeError, "这句话先改成中文，80 字以内"):
+            server.author_sentence("句" * 81)
+        with self.assertRaisesRegex(RuntimeError, "这句话先改成中文，80 字以内"):
+            server.author_sentence("Snow。")
+        with self.assertRaisesRegex(RuntimeError, "这句话先改成中文，80 字以内"):
+            server.author_sentence("雪。\n")
+
+    def test_body_can_be_short_and_rejects_one_sentence(self):
+        self.assertEqual(server.author_copy("雾。冷。"), "雾。冷。")
+        eighty = "测" * 77 + "。完。"
+        self.assertEqual(len(eighty), 80)
+        self.assertEqual(server.author_copy(eighty), eighty)
+        for text in ("只有一句。", "路。A。", "测" * 78 + "。完。", "雾。冷。啊", "雾。\n冷。"):
+            with self.assertRaisesRegex(RuntimeError, "这一页要正好两句，80 字以内"):
+                server.author_copy(text)
+
+    def test_set_copy_keeps_the_previous_text_on_failure(self):
+        session = {"sentence": "旧句。", "story": {"sentence": "旧句。", "pages": [
+            {"kind": "cover", "copy": "旧句。"},
+            {"kind": "photo", "copy": "雾在路上。冷在镜头外。"},
+        ]}}
+        with self.assertRaises(RuntimeError):
+            server.set_copy(session, 1, "只有一句。")
+        self.assertEqual(session["story"]["pages"][1]["copy"], "雾在路上。冷在镜头外。")
+        story = server.set_copy(session, 0, "新的一句。")
+        self.assertEqual(story["sentence"], "新的一句。")
+        self.assertEqual(session["sentence"], "新的一句。")
+        self.assertEqual(story["pages"][0]["copy"], "新的一句。")
+
+    def test_clear_drawing_leaves_photos(self):
+        session = {"story": {"pages": [
+            {"kind": "cover"}, {"kind": "drawing"}, {"kind": "photo"},
+        ]}}
+        story = server.clear_drawing(session)
+        self.assertEqual([page["kind"] for page in story["pages"]], ["cover", "photo", "photo"])
+        for page in story["pages"]:
+            self.assertEqual(server.poster_error(page), "这一页不用画")
+
+    def test_take_sentence_ignores_a_missing_field(self):
+        session = {"sentence": "旧句。"}
+        server.take_sentence(session, {})
+        self.assertEqual(session["sentence"], "旧句。")
+        server.take_sentence(session, {"sentence": "新句。"})
+        self.assertEqual(session["sentence"], "新句。")
