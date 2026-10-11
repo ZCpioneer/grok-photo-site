@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
-import { FRAME, HOLD_MS, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook, readingShell, draftMarkup, pagesToStore, skipDrawing, exportSize } from "../site/essay.js";
+import { FRAME, HOLD_MS, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook, readingShell, draftMarkup, pagesToStore, skipDrawing, exportSize, pageTurn, layoutCopy } from "../site/essay.js";
 
 test("frame and hold", () => {
   assert.deepEqual(FRAME, { width: 1080, height: 1440, imageHeight: 1008 });
@@ -66,6 +67,41 @@ test("skipping the drawing keeps that page as a photo", () => {
   const pages = [{ kind: "cover" }, { kind: "drawing" }, { kind: "photo" }];
   assert.deepEqual(skipDrawing(pages, 1).map((page) => page.kind), ["cover", "photo", "photo"]);
   assert.deepEqual(skipDrawing(pages, 0).map((page) => page.kind), ["cover", "drawing", "photo"]);
+});
+
+test("copy clicks do not turn the page", () => {
+  const bounds = { left: 0, width: 100 };
+  assert.equal(pageTurn(10, bounds, true), 0);
+  assert.equal(pageTurn(10, bounds, false), -1);
+  assert.equal(pageTurn(80, bounds, false), 1);
+});
+
+test("a long cover sentence stays inside the export", () => {
+  const scale = 1080 / 420;
+  const top = 1008 + 16 * scale;
+  const bottom = 1440 - 12 * scale;
+  const title = "题".repeat(24);
+  const sentence = "句".repeat(80);
+  const laid = layoutCopy([title, sentence], {
+    width: 1080,
+    top,
+    bottom,
+    measure: (text, fontSize) => text.length * fontSize,
+  });
+  const kept = laid.lines.filter(Boolean).join("");
+  assert.equal(kept, title + sentence);
+  const lineHeight = laid.fontSize * 1.55;
+  const used = laid.lines.reduce((sum, line) => sum + (line ? lineHeight : lineHeight * 0.4), 0);
+  assert.ok(used <= bottom - top);
+});
+
+test("the reading column does not scroll the copy away", () => {
+  const css = readFileSync(new URL("../site/style.css", import.meta.url), "utf8");
+  const frame = css.split("\n").find((line) => line.startsWith(".essay-frame {"));
+  const copy = css.split("\n").find((line) => line.startsWith(".essay-copy {"));
+  assert.equal(frame.includes("overflow"), false);
+  assert.equal(frame.includes("aspect-ratio"), false);
+  assert.equal(copy.includes("overflow"), false);
 });
 
 test("exports keep the whole 3:4 page", () => {

@@ -1,6 +1,6 @@
 import { choosePhotos } from "./filter.js";
 import { mountHandoff } from "./handoff.js";
-import { draftMarkup, essayMarkup, pagesToStore, readingShell, sampleBook as SAMPLE, skipDrawing } from "./essay.js";
+import { draftMarkup, essayMarkup, pageTurn, pagesToStore, readingShell, sampleBook as SAMPLE, skipDrawing } from "./essay.js";
 
 const app = document.querySelector("#app");
 const hint = document.querySelector("#hint");
@@ -265,8 +265,12 @@ function showReading(pages, meta) {
     }
     const frame = essay.querySelector(".essay-frame");
     if (!frame) return;
-    const bounds = frame.getBoundingClientRect();
-    go(event.clientX < bounds.left + bounds.width / 2 ? -1 : 1);
+    const step = pageTurn(
+      event.clientX,
+      frame.getBoundingClientRect(),
+      Boolean(event.target.closest(".essay-copy")),
+    );
+    if (step) go(step);
   });
   paint();
   const handoff = mountHandoff(app.querySelector("#handoff"), { ...meta, pages: viewPages });

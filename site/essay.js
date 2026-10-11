@@ -47,6 +47,47 @@ export function exportSize(name) {
   return { width: FRAME.width, height: FRAME.height };
 }
 
+export function pageTurn(clientX, bounds, inText) {
+  if (inText || !bounds?.width) return 0;
+  return clientX < bounds.left + bounds.width / 2 ? -1 : 1;
+}
+
+function wrapToWidth(text, maxWidth, measure) {
+  const lines = [];
+  let line = "";
+  for (const char of String(text)) {
+    const next = line + char;
+    if (line && measure(next) > maxWidth) {
+      lines.push(line);
+      line = char;
+    } else {
+      line = next;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+export function layoutCopy(blocks, { width, top, bottom, measure, scale = width / 420 }) {
+  const maxWidth = width - 22 * scale * 2;
+  const build = (fontSize) => blocks.flatMap((block, index) => {
+    const lines = wrapToWidth(String(block).trim(), maxWidth, (text) => measure(text, fontSize));
+    return index ? ["", ...lines] : lines;
+  });
+  const used = (fontSize, lines) => {
+    const lineHeight = fontSize * 1.55;
+    return lines.reduce((sum, line) => sum + (line ? lineHeight : lineHeight * 0.4), 0);
+  };
+  let fontSize = 22 * scale;
+  const minSize = 8 * scale;
+  let lines = build(fontSize);
+  while (fontSize > minSize && top + used(fontSize, lines) > bottom) {
+    fontSize -= 1;
+    lines = build(fontSize);
+  }
+  return { fontSize, lines };
+}
+
 export function moveDrawing(pages, index) {
   const copy = pages.map((page) => ({ ...page }));
   if (index <= 0 || index >= pages.length || pages.length < 2) return copy;

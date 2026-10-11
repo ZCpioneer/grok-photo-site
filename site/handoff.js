@@ -1,4 +1,4 @@
-import { FRAME, HOLD_MS, coverSize, exportSize, isLegacy } from "./essay.js";
+import { FRAME, HOLD_MS, coverSize, exportSize, isLegacy, layoutCopy } from "./essay.js";
 
 const CRC_TABLE = new Uint32Array(256);
 for (let n = 0; n < 256; n += 1) {
@@ -118,22 +118,6 @@ function coverCrop(srcW, srcH, destW, destH) {
   return { sx: 0, sy: (srcH - sh) / 2, sw: srcW, sh };
 }
 
-function wrapBlock(ctx, text, maxWidth) {
-  const lines = [];
-  let line = "";
-  for (const char of String(text).trim()) {
-    const next = line + char;
-    if (line && ctx.measureText(next).width > maxWidth) {
-      lines.push(line);
-      line = char;
-    } else {
-      line = next;
-    }
-  }
-  if (line) lines.push(line);
-  return lines;
-}
-
 function paintEssay(ctx, image, page, size) {
   const { width, height } = size;
   ctx.fillStyle = "#f3eedf";
@@ -155,27 +139,25 @@ function paintEssay(ctx, image, page, size) {
     : [page.copy].filter((item) => String(item || "").trim());
   if (!blocks.length) return;
   const scale = width / 420;
-  const padX = 22 * scale;
-  const maxWidth = width - padX * 2;
+  const top = band + 16 * scale;
   const bottom = height - 12 * scale;
-  let fontSize = 22 * scale;
+  const laid = layoutCopy(blocks, {
+    width,
+    top,
+    bottom,
+    scale,
+    measure: (text, fontSize) => {
+      ctx.font = `${fontSize}px "Songti SC", "Iowan Old Style", Palatino, serif`;
+      return ctx.measureText(text).width;
+    },
+  });
+  const lineHeight = laid.fontSize * 1.55;
   ctx.fillStyle = "#282923";
   ctx.textBaseline = "top";
-  const layout = (sizePx) => {
-    ctx.font = `${sizePx}px "Songti SC", "Iowan Old Style", Palatino, serif`;
-    return blocks.flatMap((block, index) => (index ? ["", ...wrapBlock(ctx, block, maxWidth)] : wrapBlock(ctx, block, maxWidth)));
-  };
-  let lines = layout(fontSize);
-  let lineHeight = fontSize * 1.55;
-  while (fontSize > 16 * scale && band + 16 * scale + lines.length * lineHeight > bottom) {
-    fontSize -= 1;
-    lines = layout(fontSize);
-    lineHeight = fontSize * 1.55;
-  }
-  let y = band + 16 * scale;
-  for (const line of lines) {
-    if (y + lineHeight > bottom) break;
-    if (line) ctx.fillText(line, padX, y);
+  ctx.font = `${laid.fontSize}px "Songti SC", "Iowan Old Style", Palatino, serif`;
+  let y = top;
+  for (const line of laid.lines) {
+    if (line) ctx.fillText(line, 22 * scale, y);
     y += line ? lineHeight : lineHeight * 0.4;
   }
 }
