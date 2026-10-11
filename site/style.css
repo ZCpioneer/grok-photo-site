@@ -109,7 +109,7 @@ h1 { margin: 8px 0 0; font-weight: 500; font-size: 32px; letter-spacing: 0.12em;
 .xhs-thumbs img { width: 52px; height: auto; display: block; }
 .xhs-thumbs button[aria-current="true"] img { outline: 1px solid var(--ink); outline-offset: 3px; }
 .mark { position: absolute; left: 0; top: 0; z-index: 1; background: var(--ink); color: var(--paper); font-size: 12px; letter-spacing: 0.12em; line-height: 1.4; padding: 4px 7px; }
-.reel { position: relative; height: min(58vh, 540px); width: auto; aspect-ratio: 9 / 16; background: var(--paper); box-shadow: 4px 12px 22px #35322222; overflow: hidden; }
+.reel { position: relative; width: min(72vw, 360px); aspect-ratio: 1080 / 1440; height: auto; background: var(--paper); box-shadow: 4px 12px 22px #35322222; overflow: hidden; }
 .reel img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; opacity: 0; transition: opacity 0.7s linear; }
 .reel img.on { opacity: 1; }
 .linkish[aria-pressed="true"] { border-bottom: 1px solid var(--ink); }
@@ -120,7 +120,7 @@ h1 { margin: 8px 0 0; font-weight: 500; font-size: 32px; letter-spacing: 0.12em;
   .grid-piece { width: 100%; min-height: calc(100vh - 304px); }
   .cover-shot img, .xhs-hero img { width: min(78vw, 360px); }
   .xhs-copy .caption { font-size: 22px; }
-  .reel { height: min(58vh, 520px); width: auto; }
+  .reel { width: min(78vw, 360px); height: auto; }
 }
 @media (max-width: 760px) {
   #essay { grid-template-columns: 1fr 1fr; grid-template-areas: "frame frame" "prev next"; }

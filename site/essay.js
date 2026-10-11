@@ -42,6 +42,11 @@ export function coverSize(srcW, srcH, longEdge = 1500) {
   return { width: Math.round(srcW * scale), height: Math.round(srcH * scale) };
 }
 
+export function exportSize(name) {
+  if (name === "cover") return coverSize(FRAME.width, FRAME.height);
+  return { width: FRAME.width, height: FRAME.height };
+}
+
 export function moveDrawing(pages, index) {
   const copy = pages.map((page) => ({ ...page }));
   if (index <= 0 || index >= pages.length || pages.length < 2) return copy;

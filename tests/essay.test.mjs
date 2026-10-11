@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { FRAME, HOLD_MS, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook, readingShell, draftMarkup, pagesToStore, skipDrawing } from "../site/essay.js";
+import { FRAME, HOLD_MS, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook, readingShell, draftMarkup, pagesToStore, skipDrawing, exportSize } from "../site/essay.js";
 
 test("frame and hold", () => {
   assert.deepEqual(FRAME, { width: 1080, height: 1440, imageHeight: 1008 });
@@ -66,6 +66,11 @@ test("skipping the drawing keeps that page as a photo", () => {
   const pages = [{ kind: "cover" }, { kind: "drawing" }, { kind: "photo" }];
   assert.deepEqual(skipDrawing(pages, 1).map((page) => page.kind), ["cover", "photo", "photo"]);
   assert.deepEqual(skipDrawing(pages, 0).map((page) => page.kind), ["cover", "drawing", "photo"]);
+});
+
+test("exports keep the whole 3:4 page", () => {
+  assert.deepEqual(exportSize("cover"), { width: 1125, height: 1500 });
+  assert.deepEqual(exportSize("page"), { width: 1080, height: 1440 });
 });
 
 test("sample book is the four-page essay", () => {

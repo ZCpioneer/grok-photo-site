@@ -1,3 +1,5 @@
+import { FRAME, HOLD_MS, coverSize, exportSize, isLegacy } from "./essay.js";
+
 const CRC_TABLE = new Uint32Array(256);
 for (let n = 0; n < 256; n += 1) {
   let c = n;
@@ -23,34 +25,10 @@ export function captionOf(book) {
   return title || "一趟旅行";
 }
 
-// The English line sits near the bottom of a 3:5 poster. A square or 3:4 frame
-// keeps that bottom and drops empty paper from the top.
-export function frameRect(srcW, srcH, ratio) {
-  const srcRatio = srcW / srcH;
-  let sx = 0;
-  let sy = 0;
-  let sw = srcW;
-  let sh = srcH;
-  if (srcRatio < ratio) {
-    sh = srcW / ratio;
-    sy = srcH - sh;
-  } else if (srcRatio > ratio) {
-    sw = srcH * ratio;
-    sx = (srcW - sw) / 2;
-  }
-  sx = Math.max(0, Math.round(sx));
-  sy = Math.max(0, Math.round(sy));
-  sw = Math.min(srcW - sx, Math.round(sw));
-  sh = Math.min(srcH - sy, Math.round(sh));
-  return { sx, sy, sw, sh };
-}
-
-export function coverSize(srcW, srcH, longEdge = 1500) {
-  const scale = Math.min(1, longEdge / Math.max(srcW, srcH));
-  return {
-    width: Math.max(1, Math.round(srcW * scale)),
-    height: Math.max(1, Math.round(srcH * scale)),
-  };
+const PAGE_BOX = exportSize("page");
+const COVER_BOX = exportSize("cover");
+if (COVER_BOX.width !== coverSize(FRAME.width, FRAME.height).width || COVER_BOX.height !== coverSize(FRAME.width, FRAME.height).height) {
+  throw new Error("封面尺寸对不上");
 }
 
 export function zipStore(files) {
@@ -104,12 +82,6 @@ function escape(value) {
   }[char]));
 }
 
-function ext(blob) {
-  if (blob.type === "image/jpeg") return "jpg";
-  if (blob.type === "image/webp") return "webp";
-  return "png";
-}
-
 function track(urls, blob) {
   const url = URL.createObjectURL(blob);
   urls.push(url);
@@ -135,26 +107,84 @@ function jpeg(canvas) {
   });
 }
 
-function drawCrop(image, ratio, width, height) {
-  const rect = frameRect(image.width, image.height, ratio);
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d", { alpha: false });
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(image, rect.sx, rect.sy, rect.sw, rect.sh, 0, 0, width, height);
-  return canvas;
+function coverCrop(srcW, srcH, destW, destH) {
+  const destRatio = destW / destH;
+  const srcRatio = srcW / srcH;
+  if (srcRatio > destRatio) {
+    const sw = srcH * destRatio;
+    return { sx: (srcW - sw) / 2, sy: 0, sw, sh: srcH };
+  }
+  const sh = srcW / destRatio;
+  return { sx: 0, sy: (srcH - sh) / 2, sw: srcW, sh };
 }
 
-function drawScaled(image, width, height) {
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d", { alpha: false });
+function wrapBlock(ctx, text, maxWidth) {
+  const lines = [];
+  let line = "";
+  for (const char of String(text).trim()) {
+    const next = line + char;
+    if (line && ctx.measureText(next).width > maxWidth) {
+      lines.push(line);
+      line = char;
+    } else {
+      line = next;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+function paintEssay(ctx, image, page, size) {
+  const { width, height } = size;
+  ctx.fillStyle = "#f3eedf";
+  ctx.fillRect(0, 0, width, height);
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(image, 0, 0, width, height);
+  if (isLegacy(page)) {
+    const scale = Math.min(width / image.width, height / image.height);
+    const dw = image.width * scale;
+    const dh = image.height * scale;
+    ctx.drawImage(image, (width - dw) / 2, (height - dh) / 2, dw, dh);
+    return;
+  }
+  const band = Math.round(FRAME.imageHeight * height / FRAME.height);
+  const crop = coverCrop(image.width, image.height, width, band);
+  ctx.drawImage(image, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, width, band);
+  const blocks = page.kind === "cover"
+    ? [page.title, page.sentence].filter((item) => String(item || "").trim())
+    : [page.copy].filter((item) => String(item || "").trim());
+  if (!blocks.length) return;
+  const scale = width / 420;
+  const padX = 22 * scale;
+  const maxWidth = width - padX * 2;
+  const bottom = height - 12 * scale;
+  let fontSize = 22 * scale;
+  ctx.fillStyle = "#282923";
+  ctx.textBaseline = "top";
+  const layout = (sizePx) => {
+    ctx.font = `${sizePx}px "Songti SC", "Iowan Old Style", Palatino, serif`;
+    return blocks.flatMap((block, index) => (index ? ["", ...wrapBlock(ctx, block, maxWidth)] : wrapBlock(ctx, block, maxWidth)));
+  };
+  let lines = layout(fontSize);
+  let lineHeight = fontSize * 1.55;
+  while (fontSize > 16 * scale && band + 16 * scale + lines.length * lineHeight > bottom) {
+    fontSize -= 1;
+    lines = layout(fontSize);
+    lineHeight = fontSize * 1.55;
+  }
+  let y = band + 16 * scale;
+  for (const line of lines) {
+    if (y + lineHeight > bottom) break;
+    if (line) ctx.fillText(line, padX, y);
+    y += line ? lineHeight : lineHeight * 0.4;
+  }
+}
+
+function compose(image, page, size) {
+  const canvas = document.createElement("canvas");
+  canvas.width = size.width;
+  canvas.height = size.height;
+  paintEssay(canvas.getContext("2d", { alpha: false }), image, page, size);
   return canvas;
 }
 
@@ -172,35 +202,19 @@ async function prepare(book, urls, cancelled) {
     const blob = await response.blob();
     const image = await createImageBitmap(blob);
     const n = String(index + 1).padStart(2, "0");
-    masters.push({
-      blob,
-      name: `${stem}-母版-${n}.${ext(blob)}`,
-      line: page.line,
-      preview: page.url,
-    });
-    const square = await jpeg(drawCrop(image, 1, 1080, 1080));
-    const card = await jpeg(drawCrop(image, 3 / 4, 1080, 1440));
-    squares.push({
-      blob: square,
-      name: `${stem}-朋友圈-${n}.jpg`,
-      line: page.line,
-      preview: track(urls, square),
-    });
-    xhs.push({
-      blob: card,
-      name: `${stem}-小红书-${n}.jpg`,
-      line: page.line,
-      preview: track(urls, card),
-    });
+    const framed = await jpeg(compose(image, page, PAGE_BOX));
+    const preview = track(urls, framed);
+    masters.push({ blob: framed, name: `${stem}-画面-${n}.jpg`, preview });
+    xhs.push({ blob: framed, name: `${stem}-小红书-${n}.jpg`, preview });
     if (index === 0) {
-      const size = coverSize(image.width, image.height);
-      const coverBlob = await jpeg(drawScaled(image, size.width, size.height));
+      const coverBlob = await jpeg(compose(image, page, COVER_BOX));
       cover = {
         blob: coverBlob,
         name: `${stem}-朋友圈封面.jpg`,
-        line: page.line,
         preview: track(urls, coverBlob),
       };
+    } else {
+      squares.push({ blob: framed, name: `${stem}-朋友圈-${n}.jpg`, preview });
     }
     image.close?.();
   }
@@ -208,22 +222,24 @@ async function prepare(book, urls, cancelled) {
 }
 
 function shot(file, group, index) {
-  return `<button class="shot" type="button" data-one="${group}:${index}" aria-label="保存${escape(file.name)}"><img src="${file.preview}" alt="${escape(file.line || "")}"></button>`;
+  return `<button class="shot" type="button" data-one="${group}:${index}" aria-label="保存${escape(file.name)}"><img src="${file.preview}" alt=""></button>`;
 }
 
 function momentsMarkup(pack) {
-  const squares = pack.squares.map((file, index) => shot(file, "squares", index)).join("");
+  const rest = pack.squares.map((file, index) => shot(file, "squares", index)).join("");
+  const restPiece = pack.squares.length ? `
+      <div class="piece grid-piece">
+        <div class="grid-preview" data-count="${pack.squares.length}">${rest}</div>
+        <div class="actions"><button class="primary" type="button" data-set="squares">保存后面几页</button></div>
+      </div>` : "";
   return `
-    <p class="lead">高的那张单独发。方格一起发。</p>
+    <p class="lead">封面单独发。后面几页是这本的其余页。</p>
     <div class="moments-stage">
       <div class="piece">
-        <button class="shot cover-shot" type="button" data-one="cover:0" aria-label="保存${escape(pack.cover.name)}"><img src="${pack.cover.preview}" alt="${escape(pack.cover.line || "")}"></button>
+        <button class="shot cover-shot" type="button" data-one="cover:0" aria-label="保存${escape(pack.cover.name)}"><img src="${pack.cover.preview}" alt=""></button>
         <div class="actions"><button class="primary" type="button" data-set="cover">保存封面</button></div>
       </div>
-      <div class="piece grid-piece">
-        <div class="grid-preview" data-count="${pack.squares.length}">${squares}</div>
-        <div class="actions"><button class="primary" type="button" data-set="squares">保存方格</button></div>
-      </div>
+      ${restPiece}
     </div>`;
 }
 
@@ -237,7 +253,7 @@ function xhsMarkup(pack, index) {
     <div class="xhs-stage">
       <div class="xhs-hero">
         ${index === 0 ? `<span class="mark">封面</span>` : ""}
-        <img src="${page.preview}" alt="${escape(page.line || "")}">
+        <img src="${page.preview}" alt="">
         <button class="xhs-hit left" type="button" data-xhs-step="-1" aria-label="上一张"></button>
         <button class="xhs-hit right" type="button" data-xhs-step="1" aria-label="下一张"></button>
       </div>
@@ -253,10 +269,11 @@ function xhsMarkup(pack, index) {
     </div>`;
 }
 
-function videoMarkup(book) {
-  const frames = book.pages.map((page, index) => `<img src="${page.url}" alt="${escape(page.line || "")}" class="${index === 0 ? "on" : ""}">`).join("");
+function videoMarkup(book, frames) {
+  const items = frames?.length ? frames : book.pages;
+  const reel = items.map((page, index) => `<img src="${page.preview || page.url}" alt="" class="${index === 0 ? "on" : ""}">`).join("");
   return `
-    <div class="reel" data-reel>${frames}</div>
+    <div class="reel" data-reel>${reel}</div>
     <p class="lead">竖屏，一页一页翻。</p>
     <div class="actions"><button class="primary" type="button" data-video="1">保存视频</button></div>
     <p class="error" data-video-error hidden>这台浏览器做不成视频。画面可以在这里看。</p>`;
@@ -271,8 +288,8 @@ function filesFor(pack, key) {
 
 function zipName(key, title) {
   const stem = fileStem(title);
-  if (key === "masters") return `${stem}-母版.zip`;
-  if (key === "squares") return `${stem}-朋友圈方格.zip`;
+  if (key === "masters") return `${stem}-画面.zip`;
+  if (key === "squares") return `${stem}-朋友圈.zip`;
   return `${stem}-小红书.zip`;
 }
 
@@ -361,31 +378,19 @@ function flash(button, text) {
   }, 1600);
 }
 
-function drawPaper(ctx, image, width, height, alpha) {
-  ctx.globalAlpha = alpha;
-  if (alpha === 1) {
-    ctx.fillStyle = "#f3eedf";
-    ctx.fillRect(0, 0, width, height);
-  }
-  const scale = Math.min(width / image.width, height / image.height);
-  const dw = image.width * scale;
-  const dh = image.height * scale;
-  ctx.drawImage(image, (width - dw) / 2, (height - dh) / 2, dw, dh);
-  ctx.globalAlpha = 1;
-}
-
 async function recordReel(pages, title) {
-  const width = 720;
-  const height = 1280;
+  const size = exportSize("page");
   const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = size.width;
+  canvas.height = size.height;
   const ctx = canvas.getContext("2d", { alpha: false });
-  const bitmaps = [];
+  const frames = [];
   for (const page of pages) {
     const response = await fetch(page.url);
     if (!response.ok) throw new Error("这一页读不出来");
-    bitmaps.push(await createImageBitmap(await response.blob()));
+    const bitmap = await createImageBitmap(await response.blob());
+    frames.push(compose(bitmap, page, size));
+    bitmap.close?.();
   }
   const mime = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm", "video/mp4"].find((type) => {
     try {
@@ -396,7 +401,7 @@ async function recordReel(pages, title) {
   });
   if (!mime || typeof canvas.captureStream !== "function") throw new Error("unsupported");
   const fade = 0.45;
-  const hold = Math.max(1.6, Math.min(3, 13 / pages.length));
+  const hold = HOLD_MS / 1000;
   const span = hold + fade;
   const total = pages.length * span - fade;
   const stream = canvas.captureStream(30);
@@ -412,9 +417,12 @@ async function recordReel(pages, title) {
     const pos = Math.min(pages.length - 1, time / span);
     const index = Math.min(pages.length - 1, Math.floor(pos));
     const local = pos - index;
-    drawPaper(ctx, bitmaps[index], width, height, 1);
+    ctx.globalAlpha = 1;
+    ctx.drawImage(frames[index], 0, 0);
     if (index < pages.length - 1 && local > hold) {
-      drawPaper(ctx, bitmaps[index + 1], width, height, Math.min(1, (local - hold) / fade));
+      ctx.globalAlpha = Math.min(1, (local - hold) / fade);
+      ctx.drawImage(frames[index + 1], 0, 0);
+      ctx.globalAlpha = 1;
     }
   };
   paint(0);
@@ -434,7 +442,7 @@ async function recordReel(pages, title) {
   });
   recorder.stop();
   await stopped;
-  bitmaps.forEach((image) => image.close?.());
+  frames.forEach((frame) => frame.getContext("2d")?.clearRect?.(0, 0, frame.width, frame.height));
   stream.getTracks().forEach((track) => track.stop());
   const extension = mime.includes("mp4") ? "mp4" : "webm";
   return { blob: new Blob(chunks, { type: mime }), name: `${fileStem(title)}-视频.${extension}` };
@@ -480,7 +488,7 @@ export function mountHandoff(host, book, hooks = {}) {
       images[index].classList.remove("on");
       index = (index + 1) % images.length;
       images[index].classList.add("on");
-    }, 2800);
+    }, HOLD_MS);
   }
 
   function markTabs() {
@@ -492,7 +500,7 @@ export function mountHandoff(host, book, hooks = {}) {
   function renderStage() {
     stage.hidden = false;
     if (format === "video") {
-      stage.innerHTML = videoMarkup(book);
+      stage.innerHTML = videoMarkup(book, pack?.masters);
       if (!matchMedia("(prefers-reduced-motion: reduce)").matches) startReel();
       return;
     }
@@ -587,7 +595,7 @@ export function mountHandoff(host, book, hooks = {}) {
     if (cancelled) return;
     pack = result;
     mastersButton.disabled = false;
-    if (format === "moments" || format === "xhs") renderStage();
+    if (format === "moments" || format === "xhs" || format === "video") renderStage();
   }).catch((error) => {
     if (cancelled || error?.message === "cancelled") return;
     if (format !== "video") stage.innerHTML = `<p class="error">朋友圈和小红书这版没有准备好。</p>`;
