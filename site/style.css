@@ -35,6 +35,10 @@ h1 { margin: 8px 0 0; font-weight: 500; font-size: 32px; letter-spacing: 0.12em;
 .note { width: 100%; margin-top: 14px; border: 0; border-bottom: 1px solid #c9c4b4; background: transparent; font: inherit; padding: 8px 0; }
 .story { margin: 0; padding-left: 18px; line-height: 1.8; }
 .actions { display: flex; gap: 10px; margin-top: 22px; }
+.draft-bar { position: sticky; bottom: 0; display: flex; gap: 10px; flex-wrap: wrap; margin-top: 22px; padding: 12px 0; background: var(--paper); }
+.draft-page .essay-page { position: relative; }
+.review-pair { display: grid; grid-template-columns: 2fr 1fr; gap: 12px; align-items: start; }
+.review-pair img { width: 100%; height: auto; }
 .error { color: var(--red); }
 .reading-area { position: relative; display: flex; justify-content: center; align-items: center; min-height: 0; }
 .book-wrap { width: min(860px, calc((100vh - 340px) * 1.2)); aspect-ratio: 6 / 5; perspective: 2400px; margin: 12px auto 8px; touch-action: pan-y; }

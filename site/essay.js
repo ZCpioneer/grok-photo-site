@@ -170,18 +170,77 @@ export function skipDrawing(pages, index) {
   ));
 }
 
+export function sentenceFields(draft, prior = {}) {
+  const answers = prior.answers || {};
+  return {
+    sentence: prior.sentence ?? draft?.sentence ?? "",
+    note: prior.note ?? "",
+    checks: (draft?.checks || []).map((item) => ({
+      id: item.id,
+      text: item.text,
+      checked: Boolean(answers[item.id]),
+    })),
+  };
+}
+
+export function sentenceMarkup(fields) {
+  const checks = (fields.checks || []).map((item) => `
+    <label class="check">
+      <input type="checkbox" name="check" value="${escapeHtml(item.id)}"${item.checked ? " checked" : ""}>
+      <span>${escapeHtml(item.text)}</span>
+    </label>`).join("");
+  return `
+    <p class="lead">这句话对吗？不对就直接改它。</p>
+    <textarea class="sentence" id="sentence" maxlength="80">${escapeHtml(fields.sentence || "")}</textarea>
+    <p class="kicker">这几件发生过的，勾上</p>
+    ${checks}
+    <input class="note" id="note" maxlength="200" placeholder="补一句你记得的，也可以空着" value="${escapeHtml(fields.note || "")}">
+    <div class="actions">
+      <button class="primary" type="button" id="to-story">按这些重写故事</button>
+      <a class="quiet" href="#/">不做了</a>
+    </div>`;
+}
+
+export function copyCountLabel(text) {
+  return `${String(text ?? "").trim().length} / 80`;
+}
+
+export function copyEditor(index, text) {
+  const value = String(text ?? "");
+  return `<textarea data-editor="${index}" maxlength="80">${escapeHtml(value)}</textarea><span data-count>${copyCountLabel(value)}</span><button type="button" data-save="${index}">改好</button>`;
+}
+
 export function draftMarkup(story, photosById) {
+  const hasDrawing = story.pages.some((page) => page.kind === "drawing");
   const pages = story.pages.map((page, index) => {
     const photo = photosById.get(page.photoId);
     const image = `<img class="essay-image" src="${escapeHtml(photo?.url || "")}" alt="">`;
-    const copy = String(page.copy ?? "").trim();
-    const text = copy ? `<div class="essay-copy"><p>${escapeHtml(copy)}</p></div>` : "";
+    const mark = page.kind === "drawing" ? `<span class="mark">这一页将画成插画</span>` : "";
+    let text = "";
+    if (page.kind === "cover") {
+      const sentence = String(story.sentence ?? page.copy ?? "").trim();
+      text = `<div class="essay-copy"><h1>${escapeHtml(story.title || "")}</h1>${sentence ? `<p data-edit="0">${escapeHtml(sentence)}</p>` : `<p data-edit="0"></p>`}</div>`;
+    } else {
+      const copy = String(page.copy ?? "").trim();
+      text = `<div class="essay-copy"><p data-edit="${index}">${escapeHtml(copy)}</p></div>`;
+    }
     const control = page.kind === "cover"
       ? ""
-      : `<div class="actions"><button class="quiet" type="button" data-draw="${index}">改成画</button></div>`;
-    return `<section class="draft-page"><div class="essay-frame"><article class="essay-page">${image}${text}</article></div>${control}</section>`;
+      : page.kind === "drawing"
+        ? `<div class="actions"><button class="quiet" type="button" data-clear="${index}">改回照片</button></div>`
+        : `<div class="actions"><button class="quiet" type="button" data-draw="${index}">改成画</button></div>`;
+    return `<section class="draft-page"><div class="essay-frame"><article class="essay-page">${mark}${image}${text}</article></div>${control}</section>`;
   }).join("");
-  return `${pages}<div class="actions"><button class="primary" type="button" data-choice="draw">就按这个做</button></div>`;
+  const clear = hasDrawing ? `<button class="quiet" type="button" data-clear="all">都用原片</button>` : "";
+  return `<p class="lead">字是替你起的稿，不对的地方直接改。</p>${pages}<div class="draft-bar"><button class="primary" type="button" data-choice="draw">就按这个做</button>${clear}<button class="quiet" type="button" data-choice="back">回到勾选</button></div>`;
+}
+
+export function waitMarkup(title, index, url) {
+  return `<p class="kicker">${escapeHtml(title)}</p><p class="sentence">正在画第 ${index + 1} 页</p><img src="${escapeHtml(url)}" alt=""><p class="lead">只有这一页要画。其余的页用原来的照片。</p>`;
+}
+
+export function reviewMarkup() {
+  return `<div class="actions"><button class="primary" type="button" data-choice="keep">留下这幅</button><button class="quiet" type="button" data-choice="retry">再画一次</button><button class="quiet" type="button" data-choice="original">用原片</button></div>`;
 }
 
 export function readingShell() {

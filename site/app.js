@@ -1,6 +1,6 @@
 import { choosePhotos } from "./filter.js";
 import { mountHandoff } from "./handoff.js";
-import { draftMarkup, essayMarkup, pageTurn, pagesToStore, readingShell, sampleBook as SAMPLE, skipDrawing } from "./essay.js";
+import { copyCountLabel, copyEditor, draftMarkup, essayMarkup, pageTurn, pagesToStore, readingShell, reviewMarkup, sampleBook as SAMPLE, sentenceFields, sentenceMarkup, skipDrawing, waitMarkup } from "./essay.js";
 
 const app = document.querySelector("#app");
 const hint = document.querySelector("#hint");
@@ -183,7 +183,7 @@ async function showShelf(token) {
     <div class="shelf-head">
       <div>
         <h1>书架</h1>
-        <p class="lead">一次丢进一趟旅行的照片。先确认一句故事，再画成纸刊。</p>
+        <p class="lead">一次丢进一趟旅行的照片。先确认一句故事，再做成图文。</p>
       </div>
       <a class="primary" href="#/make">做一本</a>
     </div>
@@ -322,7 +322,7 @@ function waitForChoice(root) {
 }
 
 async function showMake(token) {
-  setHint("先确认故事，再画");
+  setHint("先确认这篇图文");
   render(`
     <div class="card">
       <h1>做一本</h1>
@@ -403,31 +403,17 @@ async function showMake(token) {
       if (alive(token)) fail(reason.message);
       return;
     }
-    if (alive(token)) await confirmSentence(token, session, draft, chosen);
+    if (alive(token)) await confirmSentence(token, session, draft, chosen, {});
   }
 }
 
-async function confirmSentence(token, session, draft, chosen) {
+async function confirmSentence(token, session, draft, chosen, prior = {}) {
   if (!alive(token)) return;
-  const checks = draft.checks.map((item) => `
-    <label class="check">
-      <input type="checkbox" name="check" value="${escape(item.id)}">
-      <span>${escape(item.text)}</span>
-    </label>`).join("");
   render(`
     <div class="card">
-      <p class="kicker">这本册子大概是</p>
-      <p class="sentence">${escape(draft.sentence || "这趟旅行还没有被说成一句话。")}</p>
-      <p class="lead">这句话对，就可以按它走。说不准的地方勾上；选「没有」也是回答。想到的可以补一句。</p>
-      <p class="kicker">这几件，有的话勾上</p>
-      ${checks}
-      <input class="note" id="note" maxlength="200" placeholder="补一句你记得的，也可以空着">
+      ${sentenceMarkup(sentenceFields(draft, prior))}
       <p class="lead">留下 ${chosen.kept.length} 张，其余 ${chosen.dropped} 张已在本机放下。</p>
       <p class="error" id="make-error" hidden></p>
-      <div class="actions">
-        <button class="primary" type="button" id="to-story">按这些重写故事</button>
-        <a class="quiet" href="#/">放回书架</a>
-      </div>
     </div>`);
   const boxes = [...app.querySelectorAll('input[name="check"]')];
   boxes.forEach((box) => {
@@ -450,14 +436,15 @@ async function confirmSentence(token, session, draft, chosen) {
       answers[box.value] = box.checked;
     });
     const note = app.querySelector("#note").value.trim();
+    const sentence = app.querySelector("#sentence").value;
     try {
-      const story = await post("/api/story", { session, answers, note });
+      const story = await post("/api/story", { session, answers, note, sentence });
       if (alive(token)) {
         await confirmStory(
           token,
           session,
           story,
-          () => confirmSentence(token, session, draft, chosen),
+          () => confirmSentence(token, session, draft, chosen, { sentence, note, answers }),
           chosen,
         );
       }
@@ -490,16 +477,75 @@ async function confirmStory(token, session, story, back, chosen) {
   const paint = () => {
     app.innerHTML = `
       <div class="card">
-        <p class="kicker">${escape(current.title)}</p>
-        <p class="lead">照片还是照片。要换的那一页，点「改成画」。认了才开始做。</p>
         ${draftMarkup(current, photosById)}
         <p class="error" id="make-error" hidden></p>
-        <div class="actions">
-          <button class="quiet" type="button" data-choice="back">回到勾选</button>
-        </div>
       </div>`;
   };
+  const showError = (reason) => {
+    const error = app.querySelector("#make-error");
+    if (!error) return;
+    error.hidden = false;
+    error.textContent = reason.message;
+  };
+  const saveEditor = async () => {
+    const editor = app.querySelector("[data-editor]");
+    if (!editor) return;
+    current = await post("/api/copy", {
+      session,
+      index: Number(editor.dataset.editor),
+      copy: editor.value,
+    });
+  };
+  let drew = false;
+  let resolveDrawn = () => {};
+  const drawn = new Promise((resolve) => {
+    resolveDrawn = resolve;
+  });
+  const proceed = (value) => {
+    if (drew) return;
+    drew = true;
+    resolveDrawn(value);
+  };
+  const onInput = (event) => {
+    const editor = event.target.closest("[data-editor]");
+    if (!editor) return;
+    const count = editor.parentElement?.querySelector("[data-count]");
+    if (count) count.textContent = copyCountLabel(editor.value);
+  };
   const onDraw = async (event) => {
+    const edit = event.target.closest("[data-edit]");
+    if (edit) {
+      const index = Number(edit.dataset.edit);
+      const copy = index === 0 ? (current.sentence || current.pages[0]?.copy || "") : (current.pages[index]?.copy || "");
+      edit.closest(".essay-copy").innerHTML = index === 0
+        ? `<h1>${escape(current.title || "")}</h1>${copyEditor(index, copy)}`
+        : copyEditor(index, copy);
+      return;
+    }
+    const save = event.target.closest("[data-save]");
+    if (save) {
+      save.disabled = true;
+      try {
+        await saveEditor();
+        if (alive(token)) paint();
+      } catch (reason) {
+        if (alive(token)) showError(reason);
+        save.disabled = false;
+      }
+      return;
+    }
+    const clear = event.target.closest("[data-clear]");
+    if (clear) {
+      clear.disabled = true;
+      try {
+        current = await post("/api/drawing", { session, clear: true });
+        if (alive(token)) paint();
+      } catch (reason) {
+        if (alive(token)) showError(reason);
+        clear.disabled = false;
+      }
+      return;
+    }
     const button = event.target.closest("[data-draw]");
     if (!button || button.disabled) return;
     button.disabled = true;
@@ -509,22 +555,37 @@ async function confirmStory(token, session, story, back, chosen) {
       paint();
     } catch (reason) {
       if (!alive(token)) return;
-      const error = app.querySelector("#make-error");
-      if (!error) return;
-      error.hidden = false;
-      error.textContent = reason.message;
+      showError(reason);
       button.disabled = false;
+    }
+  };
+  const onChoose = async (event) => {
+    const go = event.target.closest('[data-choice="draw"]');
+    if (!go) return;
+    event.stopImmediatePropagation();
+    go.disabled = true;
+    try {
+      await saveEditor();
+      if (alive(token)) proceed("draw");
+    } catch (reason) {
+      if (alive(token)) showError(reason);
+      go.disabled = false;
     }
   };
   paint();
   app.addEventListener("click", onDraw);
+  app.addEventListener("click", onChoose);
+  app.addEventListener("input", onInput);
   const prior = cleanup;
   cleanup = () => {
     app.removeEventListener("click", onDraw);
+    app.removeEventListener("click", onChoose);
+    app.removeEventListener("input", onInput);
+    proceed(null);
     release();
     prior();
   };
-  const choice = await waitForChoice(app);
+  const choice = await Promise.race([drawn, waitForChoice(app)]);
   if (!alive(token) || !choice) return;
   if (choice === "back") {
     await back();
@@ -543,41 +604,67 @@ async function drawBook(token, session, story, chosen) {
       if (blob) made.push({ page: pages[index], blob });
       continue;
     }
+    const sourceBlob = kept.get(pages[index].photoId) || null;
+    const sourceUrl = sourceBlob ? URL.createObjectURL(sourceBlob) : "";
     let blob = null;
     let skipped = false;
-    while (!blob && !skipped && alive(token)) {
-      render(`
-        <div class="card">
-          <p class="kicker">${escape(story.title)}</p>
-          <p class="sentence">正在画这一页</p>
-          <p class="lead">只有这一页要画。其余的页用原来的照片。</p>
-        </div>`);
-      try {
-        const result = await post("/api/poster", { session, index });
-        const response = await fetch(result.url);
-        if (!response.ok) throw new Error("这一页画完了，但没有存下来");
-        blob = await response.blob();
-      } catch (reason) {
-        if (!alive(token)) return;
-        render(`
-          <div class="card">
-            <p class="kicker">${escape(story.title)}</p>
-            <p class="sentence">这一页没有画成</p>
-            <p class="error">${escape(reason.message)}</p>
-            <p class="lead">这一页可以再试。跳过的话，用原来的照片，后面的页继续。</p>
-            <div class="actions">
-              <button class="primary" type="button" data-choice="retry">再画这一页</button>
-              <button class="quiet" type="button" data-choice="skip">跳过这一页</button>
-            </div>
-          </div>`);
-        const choice = await waitForChoice(app);
-        if (!alive(token) || !choice) return;
-        if (choice === "skip") {
-          pages = skipDrawing(pages, index);
-          blob = kept.get(pages[index].photoId) || null;
-          skipped = true;
+    try {
+      while (!blob && !skipped && alive(token)) {
+        render(`<div class="card">${waitMarkup(story.title, index, sourceUrl)}</div>`);
+        try {
+          const result = await post("/api/poster", { session, index });
+          const response = await fetch(result.url);
+          if (!response.ok) throw new Error("这一页画完了，但没有存下来");
+          const drawnBlob = await response.blob();
+          const drawnUrl = URL.createObjectURL(drawnBlob);
+          try {
+            render(`
+              <div class="card">
+                <p class="kicker">${escape(story.title)}</p>
+                <div class="review-pair">
+                  <img src="${escape(drawnUrl)}" alt="">
+                  <img src="${escape(sourceUrl)}" alt="">
+                </div>
+                ${reviewMarkup()}
+              </div>`);
+            const choice = await waitForChoice(app);
+            if (!alive(token) || !choice) return;
+            if (choice === "retry") {
+              blob = null;
+            } else if (choice === "original") {
+              pages = skipDrawing(pages, index);
+              blob = sourceBlob;
+              skipped = true;
+            } else {
+              blob = drawnBlob;
+            }
+          } finally {
+            URL.revokeObjectURL(drawnUrl);
+          }
+        } catch (reason) {
+          if (!alive(token)) return;
+          render(`
+            <div class="card">
+              <p class="kicker">${escape(story.title)}</p>
+              <p class="sentence">这一页没有画成</p>
+              <p class="error">${escape(reason.message)}</p>
+              <p class="lead">这一页可以再试。跳过的话，用原来的照片，后面的页继续。</p>
+              <div class="actions">
+                <button class="primary" type="button" data-choice="retry">再画这一页</button>
+                <button class="quiet" type="button" data-choice="skip">跳过这一页</button>
+              </div>
+            </div>`);
+          const choice = await waitForChoice(app);
+          if (!alive(token) || !choice) return;
+          if (choice === "skip") {
+            pages = skipDrawing(pages, index);
+            blob = sourceBlob;
+            skipped = true;
+          }
         }
       }
+    } finally {
+      if (sourceUrl) URL.revokeObjectURL(sourceUrl);
     }
     if (blob) made.push({ page: pages[index], blob });
   }

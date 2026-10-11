@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { FRAME, HOLD_MS, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook, readingShell, draftMarkup, pagesToStore, skipDrawing, exportSize, pageTurn, layoutCopy, holdMs, reelCues, reelDurationLabel, imageFit, placeImage, wrapLines } from "../site/essay.js";
+import { FRAME, HOLD_MS, coverSize, moveDrawing, isLegacy, essayMarkup, sampleBook, readingShell, draftMarkup, pagesToStore, skipDrawing, exportSize, pageTurn, layoutCopy, holdMs, reelCues, reelDurationLabel, imageFit, placeImage, wrapLines, sentenceFields, sentenceMarkup, copyCountLabel, waitMarkup, reviewMarkup } from "../site/essay.js";
 
 test("frame and hold", () => {
   assert.deepEqual(FRAME, { width: 1080, height: 1440, imageHeight: 1008 });
@@ -37,19 +37,74 @@ test("reading shell puts the essay before the handoff", () => {
   assert.equal(html.includes("翻册"), false);
 });
 
-test("draft shows the photo and a drawing control", () => {
+test("sentence fields survive a round trip", () => {
+  const fields = sentenceFields(
+    { sentence: "旧句", checks: [{ id: "c1", text: "下过雪" }, { id: "none", text: "这几件都没发生" }] },
+    { sentence: "新句", note: "雾很冷", answers: { c1: true } },
+  );
+  assert.equal(fields.sentence, "新句");
+  assert.equal(fields.note, "雾很冷");
+  assert.deepEqual(fields.checks.map((item) => item.checked), [true, false]);
+  assert.equal(sentenceFields({ sentence: "旧句" }, { sentence: "" }).sentence, "");
+  assert.equal(copyCountLabel(" 雾。冷。 "), "4 / 80");
+});
+
+test("sentence screen asks one question", () => {
+  const html = sentenceMarkup({
+    sentence: "雪停在远处。",
+    note: "",
+    checks: [{ id: "none", text: "这几件都没发生", checked: false }],
+  });
+  assert.match(html, /这句话对吗？不对就直接改它。/);
+  assert.match(html, /这几件发生过的，勾上/);
+  assert.match(html, /不做了/);
+  assert.equal(html.includes("放回书架"), false);
+  assert.equal(html.includes("说不准的地方勾上"), false);
+});
+
+test("draft marks the drawing and keeps the title inside the page", () => {
   const html = draftMarkup({
     title: "雪后",
     sentence: "雪停在远处，这一趟就从这里看过去。",
     pages: [
       { photoId: "a", kind: "cover", copy: "雪停在远处，这一趟就从这里看过去。" },
-      { photoId: "b", kind: "drawing", copy: "路还在雾里，两边的树只剩一层浅色。我们没有再往前走，照片把这段空空地停在了这里。" },
+      { photoId: "b", kind: "drawing", copy: "雾。冷。" },
+      { photoId: "c", kind: "photo", copy: "巷。静。" },
     ],
-  }, new Map([["a", { url: "a.jpg" }], ["b", { url: "b.jpg" }]]));
-  assert.match(html, /就按这个做/);
-  assert.match(html, /data-draw="1"/);
+  }, new Map([["a", { url: "a.jpg" }], ["b", { url: "b.jpg" }], ["c", { url: "c.jpg" }]]));
+  assert.match(html, /<h1>雪后<\/h1>/);
+  assert.match(html, /这一页将画成插画/);
+  assert.match(html, /改回照片/);
+  assert.match(html, /data-draw="2"/);
+  assert.match(html, /都用原片/);
+  assert.match(html, /字是替你起的稿，不对的地方直接改。/);
+  assert.match(html, /data-edit="0"/);
+  assert.match(html, /data-edit="1"/);
+  assert.match(html, /data-edit="2"/);
+  assert.equal(html.includes("<h1 data-edit"), false);
   assert.equal(html.includes("data-draw=\"0\""), false);
-  assert.equal(html.includes("THE "), false);
+  assert.equal(html.includes("data-draw=\"1\""), false);
+});
+
+test("wait and review name the page and the three choices", () => {
+  const waiting = waitMarkup("雪后", 2, "source.jpg");
+  assert.match(waiting, /正在画第 3 页/);
+  assert.match(waiting, /source\.jpg/);
+  const review = reviewMarkup();
+  assert.match(review, /留下这幅/);
+  assert.match(review, /再画一次/);
+  assert.match(review, /用原片/);
+  assert.match(review, /data-choice="keep"/);
+  assert.match(review, /data-choice="original"/);
+});
+
+test("the make flow uses those screens", () => {
+  const app = readFileSync(new URL("../site/app.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../site/style.css", import.meta.url), "utf8");
+  assert.match(app, /sentenceMarkup\(sentenceFields/);
+  assert.match(app, /\/api\/copy/);
+  assert.match(css, /\.draft-bar \{[^}]*position:\s*sticky/);
+  assert.match(app, /clear:\s*true/);
 });
 
 test("stored pages keep kind and copy without the English line", () => {
