@@ -299,17 +299,36 @@ def build_story(session: dict, answers: dict, note: str) -> dict:
     return session["story"]
 
 
-def poster_prompt(page: dict) -> str:
-    anchors = "; ".join(f"({index + 1}) {anchor}" for index, anchor in enumerate(page["anchors"]))
-    return f"""Create ONE minimal editorial paper poster, vertical 3:5, as an original hand-painted gouache and opaque watercolor illustration.
-REFERENCE ROLES: Image 1 is the ONLY content source. Image 2 is ONLY the visual style and page composition reference. Match image 2's quiet ivory paper, restrained painted shapes, dry-brush grain and enormous empty upper area. Do not copy image 2's two people, green bench, coral shop, awning, or its caption.
-SEMANTIC NUCLEUS: {page['nucleus']}
-KEEP ONLY THESE ANCHORS: {anchors}. Simplify every form into flat painted masses. No realistic faces.
-COMPOSITION: continuous warm ivory textured paper edge to edge. Top 60% is entirely empty paper. A compact asymmetric illustration island sits between 63% and 87% of page height, approximately 68% of page width. At least 75% of the entire page remains unpainted quiet paper. Natural broken painted contours dissolve directly into paper, no rectangular picture frame.
-PAINT: flat simplified opaque watercolor/gouache, matte pigment, scumbled dry-brush edges, sparse paper showing through. Warm cream, charcoal, one muted environmental color, one restrained accent that has a job. No realistic shading.
-TYPE: below the illustration at 92% page height, one very small widely spaced charcoal serif line, exact text: "{page['line']}" No other text.
-DELETE: {page['discard']}; signs, logos, watermarks, extra people, vehicles, and clutter not named in the anchors.
-HARD CONSTRAINTS: redraw everything as original illustration. No retained photographic pixels, photorealism, photo filters, photographic collage, cinematic lighting, 3D, anime, ornamental stickers or extra objects. Keep the illustration small; do not fill the empty paper."""
+def drawing_prompt(page: dict) -> str:
+    anchors = "; ".join(str(anchor) for anchor in page["anchors"])
+    return (
+        "Create ONE original gouache illustration, vertical 3:5, on warm ivory paper. "
+        "Image 1 is the only content source. Image 2 is only paint and paper style. "
+        f"SEMANTIC NUCLEUS: {page['nucleus']}. "
+        f"KEEP THESE ANCHORS: {anchors}. "
+        "Fill the frame with the painted scene. Simplify forms into flat painted masses. "
+        "No text, letters, captions, or watermarks anywhere in the image. "
+        f"LEAVE OUT: {page['discard']}; signs, logos, vehicles, and clutter not named in the anchors. "
+        "Redraw as illustration. No photographic pixels, photorealism, or collage."
+    )
+
+
+def poster_error(page: dict) -> str | None:
+    if page.get("kind") != "drawing":
+        return "这一页不用画"
+    return None
+
+
+def set_drawing(session: dict, index: int) -> dict:
+    pages = session["story"]["pages"]
+    if len(pages) < 2:
+        raise RuntimeError("这一页不用画")
+    if index <= 0 or index >= len(pages):
+        raise RuntimeError("封面不能改成画")
+    for position, page in enumerate(pages):
+        page["draw"] = position == index
+    assign_drawing(pages)
+    return session["story"]
 
 
 def draw_poster(session: dict, index: int) -> str:
@@ -319,7 +338,7 @@ def draw_poster(session: dict, index: int) -> str:
     style = "data:image/png;base64," + base64.b64encode(STYLE.read_bytes()).decode()
     payload = {
         "model": IMAGE,
-        "prompt": poster_prompt(page),
+        "prompt": drawing_prompt(page),
         "image": [content, style],
         "size": "1536x2560",
         "output_format": "png",
@@ -395,11 +414,25 @@ class Handler(SimpleHTTPRequestHandler):
                 note = str(payload.get("note") or "")[:200]
                 self.end_json(200, build_story(session, answers, note))
                 return
+            if self.path == "/api/drawing":
+                index = int(payload.get("index"))
+                self.end_json(200, set_drawing(session, index))
+                return
             if self.path == "/api/poster":
                 index = int(payload.get("index"))
+                page = session["story"]["pages"][index]
+                error = poster_error(page)
+                if error:
+                    self.end_json(400, {"error": error})
+                    return
                 url = draw_poster(session, index)
                 page = session["story"]["pages"][index]
-                self.end_json(200, {"url": url, "line": page["line"], "title": session["story"]["title"]})
+                self.end_json(200, {
+                    "url": url,
+                    "copy": page["copy"],
+                    "kind": page["kind"],
+                    "title": session["story"]["title"],
+                })
                 return
             self.end_json(404, {"error": "没有这个步骤"})
         except Exception as error:  # noqa: BLE001

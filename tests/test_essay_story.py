@@ -15,6 +15,45 @@ class FitCopyTest(unittest.TestCase):
             self.assertEqual(server.fit_copy(text, "核"), fallback)
 
 
+class DrawingPromptTest(unittest.TestCase):
+    def test_prompt_fills_the_frame_and_has_no_caption(self):
+        page = {
+            "nucleus": "一盘午饭",
+            "anchors": ["白盘", "右手"],
+            "discard": "酒杯",
+            "copy": "盘子里只有一点点，手刚从右边离开。那一顿比这张画停得更久，味道一点都没被拍下来。",
+        }
+        prompt = server.drawing_prompt(page)
+        self.assertIn("一盘午饭", prompt)
+        self.assertIn("白盘", prompt)
+        self.assertIn("Fill the frame", prompt)
+        self.assertIn("No text", prompt)
+        self.assertNotIn("Top 60%", prompt)
+        self.assertNotIn("No people", prompt)
+        self.assertNotIn(page["copy"], prompt)
+
+
+class SetDrawingTest(unittest.TestCase):
+    def test_cover_cannot_become_the_drawing(self):
+        session = {"story": {"pages": [{"kind": "cover"}, {"kind": "drawing"}]}}
+        with self.assertRaisesRegex(RuntimeError, "封面不能改成画"):
+            server.set_drawing(session, 0)
+
+    def test_moves_the_single_drawing(self):
+        session = {"story": {"pages": [
+            {"kind": "cover"}, {"kind": "drawing"}, {"kind": "photo"},
+        ]}}
+        story = server.set_drawing(session, 2)
+        self.assertEqual([page["kind"] for page in story["pages"]], ["cover", "photo", "drawing"])
+
+
+class PosterGuardTest(unittest.TestCase):
+    def test_photo_page_is_refused(self):
+        self.assertEqual(server.poster_error({"kind": "photo"}), "这一页不用画")
+        self.assertEqual(server.poster_error({"kind": "cover"}), "这一页不用画")
+        self.assertIsNone(server.poster_error({"kind": "drawing"}))
+
+
 class NormalizeStoryTest(unittest.TestCase):
     def test_cover_keeps_short_sentence_and_one_drawing(self):
         photos = [
