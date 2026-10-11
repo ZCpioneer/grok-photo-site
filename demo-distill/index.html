@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>试册</title>
+  <style>
+    :root { --paper: #f3eedf; --ink: #282923; --red: #b9412e; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: #e7e5df; color: var(--ink); font: 14px "Iowan Old Style", Palatino, "Songti SC", serif; }
+    header { height: 72px; margin: 0 4%; border-bottom: 1px solid #c9c8bf; display: flex; align-items: center; justify-content: space-between; }
+    h1 { margin: 0; font-weight: 500; font-size: 22px; letter-spacing: 0.12em; }
+    .hint { color: #818277; font-size: 12px; letter-spacing: 0.08em; }
+    main { padding: 0 4% 28px; }
+    .reading-area { position: relative; display: flex; justify-content: center; align-items: center; min-height: 70vh; }
+    .book-wrap { width: min(980px, calc((100vh - 180px) * 1.2)); aspect-ratio: 6 / 5; perspective: 2400px; margin: 18px auto 26px; touch-action: pan-y; }
+    .book { width: 100%; height: 100%; position: relative; transform: translateX(-25%); transition: transform 0.8s cubic-bezier(.22,.61,.36,1); transform-style: preserve-3d; }
+    .book.open { transform: translateX(0); }
+    .book.ended { transform: translateX(25%); }
+    .sheet { position: absolute; left: 50%; top: 0; width: 50%; height: 100%; transform-origin: left center; transform-style: preserve-3d; transition: transform 1s cubic-bezier(.32,.05,.24,1); cursor: pointer; }
+    .sheet.flipped { transform: rotateY(-180deg); }
+    .face { position: absolute; inset: 0; background: var(--paper); backface-visibility: hidden; -webkit-backface-visibility: hidden; overflow: hidden; box-shadow: 1px 2px 2px #35322220, 8px 17px 28px #35322224; }
+    .back { transform: rotateY(180deg); }
+    .face::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(90deg, #201b1515, transparent 5%, transparent 96%, #fff3); }
+    .back::after { background: linear-gradient(270deg, #201b1522, transparent 6%); }
+    .page { width: 100%; height: 100%; }
+    .page img { display: block; width: 100%; height: 100%; object-fit: cover; }
+    .round { position: absolute; top: 50%; width: 42px; height: 42px; margin-top: -21px; background: transparent; border: 1px solid #b7b8af; border-radius: 50%; font-size: 22px; z-index: 20; color: inherit; cursor: pointer; }
+    .round:disabled { opacity: 0.25; cursor: default; }
+    .prev { left: -3%; }
+    .next { right: -3%; }
+    .status { display: flex; justify-content: space-between; border-top: 1px solid #cac9c0; padding: 14px 0; font-size: 12px; letter-spacing: 0.08em; }
+    #counter { color: var(--red); font-variant-numeric: tabular-nums; }
+    @media (max-width: 760px) {
+      .book-wrap { width: 100%; aspect-ratio: 0.6; min-width: 0; }
+      .book, .book.open, .book.ended { transform: none; }
+      .sheet { left: 0; width: 100%; }
+      .sheet.flipped { visibility: hidden; }
+      .sheet.mobile-back { visibility: visible; transform: none; }
+      .sheet.mobile-back .back { transform: none; z-index: 2; }
+      .sheet.mobile-back .front { visibility: hidden; }
+      .round { top: auto; bottom: -54px; }
+      .prev { left: 0; }
+      .next { right: 0; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      .book, .sheet { transition: none; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>试册</h1>
+    <p class="hint">点击书页 · 滑动 · 左右键</p>
+  </header>
+  <main>
+    <section class="reading-area" aria-label="翻页相册">
+      <button class="round prev" id="prev" type="button" aria-label="上一页">←</button>
+      <div class="book-wrap">
+        <div class="book" id="book"></div>
+      </div>
+      <button class="round next" id="next" type="button" aria-label="下一页">→</button>
+    </section>
+    <div class="status">
+      <span id="label"></span>
+      <span id="counter"></span>
+    </div>
+  </main>
+  <script>
+    const pages = [
+      ["posters/01-valley.png", "The valley keeps the snow."],
+      ["posters/02-boat.png", "The boat stays."],
+      ["posters/03-plate.png", "The plate is enough."],
+      ["posters/04-roof.png", "A roof and a mountain."]
+    ];
+    const book = document.querySelector("#book");
+    const prev = document.querySelector("#prev");
+    const next = document.querySelector("#next");
+    const mobile = () => matchMedia("(max-width: 760px)").matches;
+    let turned = 0;
+    let mobilePage = 0;
+    let locked = false;
+    const sheets = [];
+
+    book.innerHTML = Array.from({ length: Math.ceil(pages.length / 2) }, (_, i) => {
+      const faces = [0, 1].map((j) => {
+        const page = pages[i * 2 + j];
+        const inner = page
+          ? `<article class="page"><img src="${page[0]}" alt="${page[1]}" draggable="false"></article>`
+          : `<article class="page"></article>`;
+        return `<div class="face ${j ? "back" : "front"}">${inner}</div>`;
+      }).join("");
+      return `<div class="sheet" data-sheet="${i}">${faces}</div>`;
+    }).join("");
+    sheets.push(...book.querySelectorAll(".sheet"));
+
+    function render(animating = -1) {
+      const m = mobile();
+      const count = sheets.length;
+      book.classList.toggle("open", !m && turned > 0 && turned < count);
+      book.classList.toggle("ended", !m && turned === count);
+      sheets.forEach((sheet, i) => {
+        sheet.classList.toggle("flipped", m ? i < Math.floor(mobilePage / 2) : i < turned);
+        sheet.classList.toggle("mobile-back", m && i === Math.floor(mobilePage / 2) && mobilePage % 2 === 1);
+        sheet.style.zIndex = i === animating ? 100 : (m ? (i === Math.floor(mobilePage / 2) ? 50 : 0) : (i < turned ? i + 1 : 30 - i));
+      });
+      let active;
+      if (m) active = [mobilePage];
+      else if (turned === 0 || turned === count) active = [turned === 0 ? 0 : pages.length - 1];
+      else active = [turned * 2 - 1, turned * 2].filter((n) => n < pages.length);
+      document.querySelector("#label").textContent = active.map((n) => pages[n][1]).join("  ·  ");
+      document.querySelector("#counter").textContent = active.map((n) => String(n + 1).padStart(2, "0")).join("–") + " / " + String(pages.length).padStart(2, "0");
+      prev.disabled = m ? mobilePage === 0 : turned === 0;
+      next.disabled = m ? mobilePage === pages.length - 1 : turned === count;
+    }
+
+    function flip(dir) {
+      if (locked) return;
+      if (mobile()) {
+        const dest = Math.max(0, Math.min(pages.length - 1, mobilePage + dir));
+        if (dest === mobilePage) return;
+        mobilePage = dest;
+        turned = Math.min(sheets.length, Math.ceil(mobilePage / 2));
+        render();
+        return;
+      }
+      const dest = Math.max(0, Math.min(sheets.length, turned + dir));
+      if (dest === turned) return;
+      const moving = dir > 0 ? turned : turned - 1;
+      turned = dest;
+      mobilePage = Math.min(pages.length - 1, Math.max(0, turned * 2 - 1));
+      locked = true;
+      render(moving);
+      setTimeout(() => { locked = false; render(); }, matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 1020);
+    }
+
+    prev.onclick = () => flip(-1);
+    next.onclick = () => flip(1);
+    let down = null;
+    let suppress = false;
+    book.addEventListener("pointerdown", (event) => { down = { x: event.clientX, y: event.clientY }; });
+    book.addEventListener("pointerup", (event) => {
+      if (!down) return;
+      const dx = event.clientX - down.x;
+      const dy = event.clientY - down.y;
+      down = null;
+      if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+        suppress = true;
+        flip(dx < 0 ? 1 : -1);
+        setTimeout(() => { suppress = false; }, 100);
+      }
+    });
+    book.addEventListener("click", (event) => {
+      if (suppress) return;
+      if (mobile()) {
+        const rect = book.getBoundingClientRect();
+        flip(event.clientX - rect.left < rect.width * 0.3 ? -1 : 1);
+        return;
+      }
+      const sheet = event.target.closest(".sheet");
+      if (sheet) flip(Number(sheet.dataset.sheet) < turned ? -1 : 1);
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowRight" || event.key === "ArrowLeft") {
+        event.preventDefault();
+        flip(event.key === "ArrowRight" ? 1 : -1);
+      }
+    });
+    window.addEventListener("resize", () => render());
+    render();
+  </script>
+</body>
+</html>
