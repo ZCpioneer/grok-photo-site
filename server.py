@@ -177,6 +177,39 @@ def build_sentence(session: dict) -> dict:
     return {"sentence": session["sentence"], "checks": checks}
 
 
+FALLBACK_COPY = "这一页先停在看见的地方，别的都先不添上去。照片没说完的那一点，先留在这一页里面。"
+_ENDERS = "。？！"
+
+
+def fit_copy(text: str, nucleus: str) -> str:
+    del nucleus
+    cleaned = str(text).strip()
+    enders = sum(cleaned.count(mark) for mark in _ENDERS)
+    if (
+        "\n" in cleaned
+        or re.search(r"[A-Za-z]", cleaned)
+        or enders != 2
+        or cleaned[-1:] not in _ENDERS
+        or not 40 <= len(cleaned) <= 70
+    ):
+        return FALLBACK_COPY
+    return cleaned
+
+
+def assign_drawing(pages: list[dict]) -> None:
+    if not pages:
+        return
+    pages[0]["kind"] = "cover"
+    if len(pages) == 1:
+        return
+    flagged = [index for index, page in enumerate(pages) if index > 0 and page.get("draw")]
+    chosen = flagged[0] if len(flagged) == 1 else max(1, (len(pages) - 1) // 2)
+    for index, page in enumerate(pages):
+        if index == 0:
+            continue
+        page["kind"] = "drawing" if index == chosen else "photo"
+
+
 def english_line(value: str, fallback: str) -> str:
     cleaned = re.sub(r"[^A-Za-z0-9 .,'’-]", "", value).strip(" .")
     words = cleaned.split()
